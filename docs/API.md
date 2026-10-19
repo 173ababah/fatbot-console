@@ -17,6 +17,8 @@
 | `/api/conversations` | GET | 会话列表（按最后消息倒序） |
 | `/api/messages` | GET | 消息列表，`?chat=群 123&limit=150` |
 | `/api/send` | POST | 主动发送：`{"chat","text","voice"}` |
+| `/api/ingest` | POST | **外部机器人上报事件**（任何框架都能接） |
+| `/api/info` | GET | 当前接入信息（服务/容器/OneBot/日志来源/消息条数，不含密钥） |
 
 ## 会话与消息的数据结构
 
@@ -67,6 +69,59 @@ curl -X POST -H 'Content-Type: application/json' \
 {"ok": false, "msg": "会话格式不对：xxx"}
 ```
 
+## 上报事件（/api/ingest）
+
+任何机器人只要发一条 POST 就能进聊天记录，**不需要日志格式**。
+
+```bash
+curl -X POST "http://127.0.0.1:8090/api/ingest?token=<TOKEN>" \
+  -H 'Content-Type: application/json' \
+  -d '{"chat":{"type":"group","id":200000001},"who":"小明","text":"在吗","dir":"in"}'
+# → {"ok": true, "written": 1}
+```
+
+批量：
+
+```json
+{"events":[
+  {"group_id":200000001,"who":"小明","text":"在吗","dir":"in"},
+  {"chat":"私聊 100000001","text":"在的","dir":"out","ts":"21:03:11"}
+]}
+```
+
+字段容错：
+
+| 想要 | 可以写 |
+|---|---|
+| 会话 | `chat: "群 123"` / `{"type":"group","id":123}` / `group_id: 123` / `user_id: 456` |
+| 方向 | `dir: "in" | "out" | "send" | "sent" | "self"` |
+| 内容 | `text` 或 `message` |
+| 说话人 | `who` / `nickname` / `sender` |
+| 时间 | `ts`（可省略，默认服务器当前时间） |
+
+事件落盘在 `ingest.file`（默认 `data/ingest.jsonl`，一行一条 JSON），所以重启不丢、也能直接 `tail -f` 看。
+
+## 接入信息（/api/info）
+
+```bash
+curl "http://127.0.0.1:8090/api/info?token=<TOKEN>"
+```
+
+```json
+{
+  "service": "fishbot", "container": "snowluma",
+  "onebot": "http://127.0.0.1:3000",
+  "config_file": "/opt/fatbot-console/server/config.json",
+  "log": {"source": "journal", "journal_unit": "fishbot", "since_hours": 6,
+          "max_lines": 800, "patterns": ["in", "out"]},
+  "ingest": {"enabled": true, "file": "/opt/qqbot/data/ingest.jsonl"},
+  "qr": {"mode": "screen"}, "voice": {"engine": "siliconflow"},
+  "counts": {"messages": 128, "conversations": 5}
+}
+```
+
+`counts` 是你排查「为什么没消息」的第一站：为 0 就说明日志没匹配上或 ingest 没进来。
+
 ## 消息是怎么被解析出来的
 
 后端不存数据库，直接从两处读：
@@ -90,10 +145,16 @@ curl -X POST -H 'Content-Type: application/json' \
 
 ## 自定义
 
-| 想改 | 改哪里 |
+全部在 `config.json`（或用同名环境变量覆盖）：
+
+| 想改 | 字段 |
 |---|---|
-| 端口 | `app.py` 里的 `PORT` 或 `FATBOT_PORT` |
-| token | 环境变量 `FATBOT_TOKEN` |
-| OneBot 地址 | `FISH_OB_HTTP` / `FISH_OB_TOKEN` |
-| 日志来源 | `last_lines()` 里的 journalctl 参数 |
-| 手动发送日志路径 | `SENT_LOG` |
+| 端口 / token | `port` / `token` |
+| 服务名 / 容器名 | `service` / `container` |
+| OneBot | `onebot.http` / `onebot.token` |
+| 日志来源 | `log.source` = `journal` / `file` / `ingest`（可组合，如 `journal+ingest`） |
+| 日志格式 | `log.patterns.in` / `log.patterns.out`（正则，命名捕获组） |
+| 读取时间范围 / 行数 | `log.since_hours` / `log.max_lines` |
+| 上报文件 | `ingest.file` |
+| 二维码取法 | `qr.mode` = `screen` / `off`，以及 `crop` / `scale` / `click` |
+| 语音 | `voice.*`（`engine=off` 关闭） |

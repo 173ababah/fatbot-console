@@ -474,6 +474,9 @@ namespace FishBotConsole
     public class Cfg
     {
         public string Host = "your-server.example.com";
+        // 你的机器人：systemd 服务名 / 协议端容器名（留空表示没有容器）
+        public string Svc = "fishbot";
+        public string Ctr = "snowluma";
         public string User = "ubuntu";
         public string Pass = "Hdw173049dshbot";
         public string HostKey = "SHA256:TC+3bhPZy5VouQ7KsCHwXdV7uRgVkM9ej4e8bqKaHPA";
@@ -533,6 +536,8 @@ namespace FishBotConsole
                     else if (k == "dark") c.Dark = v == "1";
                     else if (k == "scale") { float f; if (float.TryParse(v, out f)) c.Scale = Math.Max(0.8f, Math.Min(1.5f, f)); }
                     else if (k == "webuitoken") c.WebuiToken = v;
+            else if (k == "svc") c.Svc = v;
+            else if (k == "ctr") c.Ctr = v;
                 }
             }
             catch { }
@@ -556,6 +561,8 @@ namespace FishBotConsole
                 sb.AppendLine("dark=" + (Dark ? "1" : "0"));
                 sb.AppendLine("scale=" + Scale.ToString("0.00"));
                 sb.AppendLine("webuitoken=" + WebuiToken);
+            sb.AppendLine("svc=" + (Svc ?? ""));
+            sb.AppendLine("ctr=" + (Ctr ?? ""));
                 File.WriteAllText(FilePath, sb.ToString(), new UTF8Encoding(false));
             }
             catch { }
@@ -1638,7 +1645,7 @@ namespace FishBotConsole
             {
                 try
                 {
-                    string o = Remote("journalctl -u fishbot --since '30 min ago' --no-pager 2>/dev/null "
+                    string o = Remote("journalctl -u {svc} --since '30 min ago' --no-pager 2>/dev/null "
                         + "| grep -F -e '[接收]' -e '[发送]' | tail -120", 25);
                     var lines = (o ?? "").Replace("\r", "").Split(new char[] { '\n' });
                     var fresh = new List<string>();
@@ -1719,6 +1726,10 @@ namespace FishBotConsole
             var tPass = InputFlex("密码", _cfg.Pass, Body(conn), true);
             var tFp = InputFlex("指纹", _cfg.HostKey, Body(conn), false);
             var tWebui = InputFlex("WebUI Token", _cfg.WebuiToken, Body(conn), false);
+            var tSvc = InputFlex("服务名（systemd）", _cfg.Svc, Body(conn), false);
+            tSvc.KeyUp += (s2, e2) => { _cfg.Svc = tSvc.Text.Trim(); };
+            var tCtr = InputFlex("容器名（协议端）", _cfg.Ctr, Body(conn), false);
+            tCtr.KeyUp += (s2, e2) => { _cfg.Ctr = tCtr.Text.Trim(); };
             var lSave = Line(Body(conn));
             var save = FBtn("保存连接", true, false);
             save.Click += (s, e) =>
@@ -1726,6 +1737,7 @@ namespace FishBotConsole
                 _cfg.Host = tHost.Text.Trim(); _cfg.User = tUser.Text.Trim();
                 _cfg.Pass = tPass.Text; _cfg.HostKey = tFp.Text.Trim();
                 _cfg.WebuiToken = tWebui.Text.Trim();
+            try { _cfg.Svc = tSvc.Text.Trim(); _cfg.Ctr = tCtr.Text.Trim(); } catch { }
                 _cfg.Save(); Log("连接设置已保存"); RefreshStatus();
             };
             lSave.Controls.Add(save);
@@ -1823,7 +1835,7 @@ namespace FishBotConsole
                 "机器人插件：肥鱼人设.py · v27",
                 "云端：Ubuntu 22.04 · Python 3.10.12 · nonebot2 2.5.0 · nonebot-adapter-onebot 2.4.6",
                 "协议端：SnowLuma（Docker 容器 snowluma）· OneBot v11 · WS 127.0.0.1:3001",
-                "进程管理：systemd 服务 fishbot（Restart=on-failure，关闭走 stop.flag 告别）",
+                "进程管理：systemd 服务 {svc}（Restart=on-failure，关闭走 stop.flag 告别）",
                 "SSH：plink.exe（PuTTY 0.85）· base64 传输 · -hostkey 固定指纹",
                 "模型：deepseek-v4-flash-0731（文字）／deepseek-v4-flash-vision（看图）",
                 "存储：无数据库，全部 data/*.json（ai_state / memory / roster / sticker_index）"
@@ -2001,7 +2013,7 @@ namespace FishBotConsole
 
             // ---------- 4. 语音速查 ----------
             var c4 = FlexCard("语音速查");
-            Body(c4).Controls.Add(Txt("• 换音色：改 /opt/qqbot/.env 的 FISH_VOICE_SF_VOICE，然后 sudo systemctl restart fishbot", 9f, false, _th.Sub));
+            Body(c4).Controls.Add(Txt("• 换音色：改 /opt/qqbot/.env 的 FISH_VOICE_SF_VOICE，然后 sudo systemctl restart {svc}", 9f, false, _th.Sub));
             Body(c4).Controls.Add(Txt("• 换语速：FISH_VOICE_SF_SPEED（别低于 1.05，1.02 会让模型把句子念断）", 9f, false, _th.Sub));
             Body(c4).Controls.Add(Txt("• 输出格式：必须是 SILK（FISH_VOICE_SILK=1），MP3 直发会被 QQ 二次转码，听着像劣质外放", 9f, false, _th.Sub));
             Body(c4).Controls.Add(Txt("• 中文音色只能用中文素材克隆；用日语素材克隆的音色念中文会变成乱码", 9f, false, _th.Sub));
@@ -2013,7 +2025,7 @@ namespace FishBotConsole
             var c5 = FlexCard("排错速查");
             string[][] errs = new string[][]
             {
-                new string[] { "群里不说话", "journalctl -u fishbot --since '10 min ago' | grep '\\[接收\\]' → 没收到就查协议端" },
+                new string[] { "群里不说话", "journalctl -u {svc} --since '10 min ago' | grep '\\[接收\\]' → 没收到就查协议端" },
                 new string[] { "收到但不回", "看日志里 ask_ai / AI 返回 HTTP：401 换 KEY，402/429 是额度或限流" },
                 new string[] { "掉线 / 被踢", "先重启容器；还不行点「登录二维码」用手机扫；别用同一号在别处登录" },
                 new string[] { "语音没声音", "journalctl 搜「语音 / silk / 语音日语版」；多半是音色与语言不匹配" },
@@ -2057,12 +2069,12 @@ namespace FishBotConsole
 
             string[][] cmds = new string[][]
             {
-                new string[] { "服务状态", "systemctl is-active fishbot fishweb" },
-                new string[] { "协议端容器", "sudo -n docker ps --format '{{.Names}} {{.Status}}' | grep snowluma || echo 容器没起" },
+                new string[] { "服务状态", "systemctl is-active {svc} fishweb" },
+                new string[] { "协议端容器", "sudo -n docker ps --format '{{.Names}} {{.Status}}' | grep {ctr} || echo 容器没起" },
                 new string[] { "登录情况", "curl -s -m 8 127.0.0.1:3000/get_login_info | head -c 220" },
                 new string[] { "内存", "free -m | head -2" },
-                new string[] { "最近日志", "journalctl -u fishbot -n 8 --no-pager" },
-                new string[] { "最近语音", "sudo -n docker exec snowluma sh -lc 'ls -lt /app/data/voice | head -4'" },
+                new string[] { "最近日志", "journalctl -u {svc} -n 8 --no-pager" },
+                new string[] { "最近语音", "sudo -n docker exec {ctr} sh -lc 'ls -lt /app/data/voice | head -4'" },
                 new string[] { "定时器", "systemctl list-timers 'fish*' --no-pager | head -5" },
                 new string[] { "手动发送日志", "tail -3 /opt/qqbot/data/manual_sent.log 2>/dev/null || echo 还没有手动发送记录" }
             };
@@ -2123,7 +2135,7 @@ namespace FishBotConsole
             {
                 if (MessageBox.Show(this, "要重启 fishbot + fishweb 吗？", "确认",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-                runCmd("重启服务", "sudo -n systemctl restart fishbot fishweb; sleep 3; systemctl is-active fishbot fishweb");
+                runCmd("重启服务", "sudo -n systemctl restart {svc} fishweb; sleep 3; systemctl is-active {svc} fishweb");
             };
             rowR.Controls.Add(bRestart);
             var lblR = Txt("重启 fishbot + fishweb（会二次确认）", 9f, false, _th.Danger);
@@ -2164,6 +2176,9 @@ namespace FishBotConsole
 
         string Remote(string bash, int timeoutSec)
         {
+            // 命令里的 {svc} / {ctr} 换成配置里的服务名、容器名
+            bash = (bash ?? "").Replace("{svc}", _cfg.Svc ?? "fishbot")
+                                .Replace("{ctr}", _cfg.Ctr ?? "");
             string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(bash));
             string inner = "echo " + b64 + " | base64 -d | sudo -n bash -s";
             return RunProc(PlinkPath(),
@@ -2211,10 +2226,10 @@ namespace FishBotConsole
         void DoRefresh()
         {
             string script =
-                "echo SVC=$(systemctl is-active fishbot)\n" +
+                "echo SVC=$(systemctl is-active {svc})\n" +
                 "echo NC=$(docker ps --format '{{.Names}}' | tr '\\n' ',')\n" +
                 "echo MEM=$(free -m | awk '/Mem:/{print $3\"/\"$2\" MB\"}')\n" +
-                "echo UP=$(systemctl show -p ActiveEnterTimestamp --value fishbot)\n";
+                "echo UP=$(systemctl show -p ActiveEnterTimestamp --value {svc})\n";
             string o = Remote(script, 25);
             Log("原始返回: " + o.Replace("\r", "").Replace("\n", " | ").Trim());
             if (o.Trim().Length == 0 || o.IndexOf("FATAL ERROR") >= 0 || o.IndexOf("[执行失败]") >= 0)
@@ -2229,12 +2244,12 @@ namespace FishBotConsole
             SetBig(active ? "● 运行中（云端）" : "● 已停止（云端）", active ? _th.Ok : _th.Danger);
             bool webui = WebUiReachable(3000);
             SetSubParts("服务 " + svc,
-                        "容器 " + (nc.IndexOf("snowluma") >= 0 ? "snowluma 在跑" : "无"),
+                        "容器 " + (nc.IndexOf(_cfg.Ctr ?? "") >= 0 ? _cfg.Ctr + " 在跑" : "无"),
                         "WebUI " + (webui ? "通" : "不通"),
                         "内存 " + mem,
                         "启动于 " + (up.Length > 0 ? up : "-"));
             FillParts(_vmLine, "  ·  ", "虚拟机 " + VmState(), "同一 QQ 号只能一处在线");
-            Log("状态 " + svc + " / 容器 " + (nc.IndexOf("snowluma") >= 0 ? "ok" : "缺") + " / 内存 " + mem);
+            Log("状态 " + svc + " / 容器 " + (nc.IndexOf(_cfg.Ctr ?? "") >= 0 ? "ok" : "缺") + " / 内存 " + mem);
         }
 
         void SetBig(string t, Color c)
@@ -2355,8 +2370,8 @@ namespace FishBotConsole
                 try
                 {
                     string script = act == "stop"
-                        ? "touch /opt/qqbot/data/stop.flag; sleep 11; systemctl is-active fishbot"
-                        : "systemctl " + act + " fishbot; sleep 2; systemctl is-active fishbot";
+                        ? "touch /opt/qqbot/data/stop.flag; sleep 11; systemctl is-active {svc}"
+                        : "systemctl " + act + " {svc}; sleep 2; systemctl is-active {svc}";
                     string o = Remote(script, act == "stop" ? 70 : 60);
                     Log("云端：" + label + " → " + LastLine(o));
                     Thread.Sleep(1200);
@@ -2376,7 +2391,7 @@ namespace FishBotConsole
             {
                 try
                 {
-                    string o = Remote("journalctl -u fishbot -n 60 --no-pager -o cat", 40);
+                    string o = Remote("journalctl -u {svc} -n 60 --no-pager -o cat", 40);
                     foreach (var ln in o.Replace("\r", "").Split('\n'))
                         if (ln.Trim().Length > 0) Log("  " + ln);
                     Log("---- 结束 ----");
@@ -2388,10 +2403,10 @@ namespace FishBotConsole
 
         string QrShotScript()
         {
-            return "sudo -n docker exec -u snowluma -e DISPLAY=:1 snowluma sh -lc "
+            return "sudo -n docker exec -u {ctr} -e DISPLAY=:1 {ctr} sh -lc "
                  + "\"ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
                  + "-vf 'crop=220:220:852:434,scale=660:660:flags=neighbor' -frames:v 1 -y /tmp/q.png\" >/dev/null 2>&1; "
-                 + "sudo -n docker exec snowluma sh -lc 'base64 -w0 /tmp/q.png 2>/dev/null'";
+                 + "sudo -n docker exec {ctr} sh -lc 'base64 -w0 /tmp/q.png 2>/dev/null'";
         }
 
         void FetchQrText()
@@ -2434,18 +2449,18 @@ namespace FishBotConsole
 
         static string DiagScript()
         {
-            return "echo SVC=$(systemctl is-active fishbot 2>/dev/null); "
-                 + "echo NAP=$(sudo -n docker inspect -f '{{.State.Running}}' snowluma 2>/dev/null | grep -c true); "
-                 + "echo RESTART=$(sudo -n docker inspect snowluma --format '{{.RestartCount}}' 2>/dev/null || echo 0); "
+            return "echo SVC=$(systemctl is-active {svc} 2>/dev/null); "
+                 + "echo NAP=$(sudo -n docker inspect -f '{{.State.Running}}' {ctr} 2>/dev/null | grep -c true); "
+                 + "echo RESTART=$(sudo -n docker inspect {ctr} --format '{{.RestartCount}}' 2>/dev/null || echo 0); "
                  + "echo LOGINOK=$(curl -s -m 6 -H 'Authorization: Bearer CHANGE_ME_ONEBOT_TOKEN' "
                  + "http://127.0.0.1:3000/get_login_info 2>/dev/null | grep -c '\"status\":\"ok\"'); "
-                 + "echo RX3=$(journalctl -u fishbot --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
-                 + "echo TX3=$(journalctl -u fishbot --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[发送]'); "
-                 + "echo RX60=$(journalctl -u fishbot --since '60 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
-                 + "echo CONNECTEDNOW=$(journalctl -u fishbot --since '3 hours ago' --no-pager 2>/dev/null "
+                 + "echo RX3=$(journalctl -u {svc} --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
+                 + "echo TX3=$(journalctl -u {svc} --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[发送]'); "
+                 + "echo RX60=$(journalctl -u {svc} --since '60 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
+                 + "echo CONNECTEDNOW=$(journalctl -u {svc} --since '3 hours ago' --no-pager 2>/dev/null "
                  + "| grep -E 'connected|Trying to reconnect' | tail -1 | grep -c connected); "
-                 + "echo LASTRX=$(journalctl -u fishbot --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[接收]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1); "
-                 + "echo LASTTX=$(journalctl -u fishbot --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[发送]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1)";
+                 + "echo LASTRX=$(journalctl -u {svc} --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[接收]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1); "
+                 + "echo LASTTX=$(journalctl -u {svc} --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[发送]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1)";
         }
 
         void ApplyDiag(string raw, bool webui)
@@ -2497,7 +2512,7 @@ namespace FishBotConsole
             else if (nap == 0)
             {
                 verdict = "不在线：协议端容器没起来";
-                hint = "点「一键修复」会 docker start snowluma（约 30 秒）。";
+                hint = "点「一键修复」会 docker start {ctr}（约 30 秒）。";
                 color = _th.Danger;
             }
             else if (busy)
@@ -2551,7 +2566,7 @@ namespace FishBotConsole
             {
                 new Thread(() =>
                 {
-                    try { Remote("sudo -n docker start snowluma 2>&1; echo done", 60); Log("已尝试启动 snowluma 容器"); }
+                    try { Remote("sudo -n docker start {ctr} 2>&1; echo done", 60); Log("已尝试启动 {ctr} 容器"); }
                     catch (Exception ex) { Log("启动失败: " + ex.Message); }
                     Thread.Sleep(1500);
                     RunDiagnosis();
@@ -2653,7 +2668,7 @@ namespace FishBotConsole
                 {
                     try
                     {
-                        Remote("sudo -n docker restart snowluma >/dev/null 2>&1; sleep 22", 60);
+                        Remote("sudo -n docker restart {ctr} >/dev/null 2>&1; sleep 22", 60);
                         Thread.Sleep(1200);
                         LoadQr(pic, tip);
                     }
@@ -2679,12 +2694,12 @@ namespace FishBotConsole
         // 取二维码：容器里点「刷新」→ 挪开鼠标 → 截屏裁图 → 容器里 base64 → 传回来
         string QrScript()
         {
-            return "sudo -n docker exec -u snowluma -e DISPLAY=:1 snowluma sh -lc 'xdotool mousemove 961 581 click 1' >/dev/null 2>&1; "
+            return "sudo -n docker exec -u {ctr} -e DISPLAY=:1 {ctr} sh -lc 'xdotool mousemove 961 581 click 1' >/dev/null 2>&1; "
                  + "sleep 3; "
-                 + "sudo -n docker exec -u snowluma -e DISPLAY=:1 snowluma sh -lc \"xdotool mousemove 1500 950; "
+                 + "sudo -n docker exec -u {ctr} -e DISPLAY=:1 {ctr} sh -lc \"xdotool mousemove 1500 950; "
                  + "ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
                  + "-vf 'crop=220:220:852:434,scale=660:660:flags=neighbor' -frames:v 1 -y /tmp/qr_ui.png\" >/dev/null 2>&1; "
-                 + "sudo -n docker exec snowluma sh -lc 'base64 -w0 /tmp/qr_ui.png'";
+                 + "sudo -n docker exec {ctr} sh -lc 'base64 -w0 /tmp/qr_ui.png'";
         }
 
         public byte[] FetchQrPng()
@@ -2738,7 +2753,7 @@ namespace FishBotConsole
             {
                 try
                 {
-                    string o = Remote("sudo -n docker restart snowluma >/dev/null 2>&1; sleep 25; sudo -n docker ps --format '{{.Names}} {{.Status}}'", 120);
+                    string o = Remote("sudo -n docker restart {ctr} >/dev/null 2>&1; sleep 25; sudo -n docker ps --format '{{.Names}} {{.Status}}'", 120);
                     Log("容器：" + FirstLine(o));
                 }
                 catch (Exception e) { Log("重启容器失败: " + e.Message); }
@@ -3306,7 +3321,7 @@ namespace FishBotConsole
             if (args.Length > 0 && args[0].TrimStart('-').ToLower() == "status")
             {
                 var f = new MainForm();
-                string o = f.Remote("systemctl is-active fishbot", 20);
+                string o = f.Remote("systemctl is-active {svc}", 20);
                 File.WriteAllText(Path.Combine(Path.GetTempPath(), "fish_cli_result.json"),
                     "{\"ok\":true,\"raw\":\"" + o.Replace("\r", "").Replace("\n", " ").Replace("\"", "'") + "\"}",
                     new UTF8Encoding(false));

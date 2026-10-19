@@ -76,6 +76,15 @@
     background:#2a2d33;color:#fff;padding:10px 16px;border-radius:12px;font-size:.85rem;
     opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:88vw;text-align:center}
   .toast.on{opacity:1}
+  /* 连接设置 */
+  .set label{display:block;color:var(--sub);font-size:.76rem;margin:10px 0 4px}
+  .set input{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);
+    background:#0f1013;color:var(--text);font-size:.9rem;font-family:inherit}
+  .set input:focus{outline:1px solid var(--accent);border-color:transparent}
+  .set .hintline{color:var(--sub);font-size:.74rem;margin-top:8px;line-height:1.55}
+  .kv2{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:.82rem;margin-top:10px}
+  .kv2 b{color:var(--sub);font-weight:500}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem}
 </style>
 </head>
 <body>
@@ -91,6 +100,35 @@
 
   <!-- 状态页 -->
   <div class="page on" id="p-home">
+
+    <div class="card set" id="set-card">
+      <div class="between"><b>连接设置</b><span class="pill" id="set-pill">–</span></div>
+      <label>接口地址（留空=当前页面所在服务器）</label>
+      <input id="in-api" type="url" placeholder="http://127.0.0.1:8090" autocomplete="off" spellcheck="false">
+      <label>Token</label>
+      <input id="in-token" type="text" placeholder="config.json 里的 token" autocomplete="off" spellcheck="false">
+      <div class="btns">
+        <button class="btn primary" id="set-save">保存并连接</button>
+        <button class="btn" id="set-test">测试连接</button>
+      </div>
+      <div class="hintline">
+        也可以直接用网址参数打开一次：<span class="mono">?api=http://你的服务器:8090&amp;token=xxxx</span>
+        （会记在本地，下次不用再填）
+      </div>
+    </div>
+
+    <div class="card" id="info-card" style="display:none">
+      <div class="between"><b>接入信息</b><span class="pill" id="info-pill">/api/info</span></div>
+      <div class="kv2">
+        <b>服务</b><span id="i-svc" class="mono">–</span>
+        <b>协议端</b><span id="i-ctr" class="mono">–</span>
+        <b>OneBot</b><span id="i-ob" class="mono">–</span>
+        <b>日志来源</b><span id="i-log" class="mono">–</span>
+        <b>事件上报</b><span id="i-ing" class="mono">–</span>
+        <b>已有消息</b><span id="i-cnt" class="mono">–</span>
+      </div>
+    </div>
+
     <div class="card">
       <div class="row" style="gap:12px">
         <span class="dot" id="dot"></span>
@@ -119,17 +157,17 @@
     </div>
 
     <div class="card">
-      <div class="between"><b>协议端</b><span class="pill">SnowLuma</span></div>
+      <div class="between"><b>协议端</b><span class="pill" id="ctr-pill">–</span></div>
       <div class="btns">
         <button class="btn" data-act="napcat-restart">重启协议端</button>
-        <a class="btn ghost" href="#" id="webui">SnowLuma WebUI</a>
+        <a class="btn ghost" href="#" id="webui">协议端 WebUI</a>
       </div>
-      <div class="muted" style="margin-top:8px">掉线（被踢/需要扫码）时，去「扫码」标签扫一下。</div>
+      <div class="muted" style="margin-top:8px">掉线（被踢/需要扫码）时，去「扫码」标签扫一下（协议端不支持截屏取码时，请用该协议端自己的方式登录）。</div>
     </div>
 
     <div class="card">
       <div class="between"><b>看门狗</b><span class="pill" id="dog-pill">–</span></div>
-      <div class="muted" id="dog-line" style="margin-top:6px">每 3 分钟检查一次：掉线自动重启 NapCat，靠密码登录救回。</div>
+      <div class="muted" id="dog-line" style="margin-top:6px">每 3 分钟检查一次：掉线自动重启协议端，必要时靠自动登录救回。</div>
     </div>
   </div>
 
@@ -180,10 +218,64 @@
   <div class="toast" id="toast"></div>
 
 <script>
-const TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('fish_token') || '';
-if (TOKEN) localStorage.setItem('fish_token', TOKEN);
-const api = (p) => p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+// ---- 连接配置：接口地址 + token（可跨域指向远端后端）----
+const Q = new URLSearchParams(location.search);
+let BASE = (Q.get('api') || localStorage.getItem('fish_api') || '').replace(/\/+$/, '');
+let TOKEN = Q.get('token') || localStorage.getItem('fish_token') || '';
+if (Q.get('api')) localStorage.setItem('fish_api', BASE);
+if (Q.get('token')) localStorage.setItem('fish_token', TOKEN);
+
+const api = (p) => (BASE + p) + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
 let logMode = 'msg';
+
+function showSet(open){
+  const c = document.getElementById('set-card');
+  if(!open && TOKEN) { c.style.display = 'none'; return; }
+  c.style.display = 'block';
+  document.getElementById('in-api').value = BASE;
+  document.getElementById('in-token').value = TOKEN;
+  document.getElementById('set-pill').textContent = TOKEN ? (BASE || '本机') : '未连接';
+}
+
+function connectTest(){
+  return getJSON('/api/status').then(d => { toast('连接正常 · ' + (d.svc||'ok')); return d; });
+}
+
+document.getElementById('set-save').onclick = async () => {
+  BASE = (document.getElementById('in-api').value || '').trim().replace(/\/+$/, '');
+  TOKEN = (document.getElementById('in-token').value || '').trim();
+  localStorage.setItem('fish_api', BASE);
+  localStorage.setItem('fish_token', TOKEN);
+  try{
+    await connectTest();
+    showSet(false);
+    refreshStatus(); loadInfo();
+  }catch(e){ toast('连接失败：' + e.message); }
+};
+document.getElementById('set-test').onclick = async () => {
+  BASE = (document.getElementById('in-api').value || '').trim().replace(/\/+$/, '');
+  TOKEN = (document.getElementById('in-token').value || '').trim();
+  try{ await connectTest(); }catch(e){ toast('连接失败：' + e.message); }
+};
+
+async function loadInfo(){
+  try{
+    const i = await getJSON('/api/info');
+    document.getElementById('info-card').style.display = 'block';
+    document.getElementById('i-svc').textContent = i.service || '（未配置）';
+    document.getElementById('i-ctr').textContent = i.container || '（无容器）';
+    document.getElementById('i-ob').textContent = i.onebot || '–';
+    const lg = i.log || {};
+    document.getElementById('i-log').textContent = (lg.source || '–') +
+      (lg.journal_unit ? ' · ' + lg.journal_unit : '') +
+      (lg.file ? ' · ' + lg.file : '');
+    document.getElementById('i-ing').textContent = (i.ingest && i.ingest.enabled) ?
+      (i.ingest.file || '开') : '关闭';
+    document.getElementById('i-cnt').textContent =
+      (i.counts ? (i.counts.messages + ' 条 / ' + i.counts.conversations + ' 个会话') : '–');
+    document.getElementById('ctr-pill').textContent = i.container || '无容器';
+  }catch(e){}
+}
 
 function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on');
   clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('on'),2200); }
@@ -313,16 +405,16 @@ document.getElementById('refresh-all').onclick = () => { refreshStatus(); if(doc
 document.getElementById('open-qr').onclick = () => document.querySelector('.tab[data-p="qr"]').click();
 document.getElementById('webui').onclick = (e) => {
   e.preventDefault();
-  location.href = 'http://' + location.hostname + ':5099/';
+  toast('协议端 WebUI 的地址请自行打开（NapCat/Lagrange/SnowLuma 各不相同）');
 };
 
-/* 首次进入：没 token 就提示 */
+/* 首次进入：没 token 先把连接设置顶上来 */
+showSet(!TOKEN);
 if(!TOKEN){
-  document.getElementById('verdict').textContent = '需要 Token';
-  document.getElementById('hint').textContent = '在地址后面加 ?token=你的token 打开一次即可记住';
+  document.getElementById('verdict').textContent = '还没连接';
+  document.getElementById('hint').textContent = '在上面填接口地址和 token，或直接用 ?api=&token= 打开一次';
 }else{
-  refreshStatus(); setInterval(refreshStatus, 15000);
-  /* 安卓 WebView 桥：可选 */
+  refreshStatus(); loadInfo(); setInterval(refreshStatus, 15000);
 }
 </script>
 </body>

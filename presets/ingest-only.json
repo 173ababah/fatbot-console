@@ -1,0 +1,49 @@
+{
+  "_说明": "任何机器人：不用日志格式，POST /api/ingest 推事件即可。qr.mode=off 表示不截屏取码",
+  "port": 8090,
+  "token": "change-me-please",
+  "cors": false,
+  "bot_dir": "/opt/qqbot",
+  "service": "",
+  "container": "",
+  "health_log": "",
+  "sent_log": "",
+  "onebot": {
+    "http": "http://127.0.0.1:3000",
+    "token": ""
+  },
+  "log": {
+    "source": "ingest",
+    "journal_unit": "",
+    "file": "",
+    "since_hours": 6,
+    "max_lines": 800,
+    "patterns": {
+      "in": "(?P<ck>群|私聊)\\s*(?P<cid>\\d+)\\s*(?P<who>.*?)\\s*->\\s*(?P<text>.*)$",
+      "out": "(?P<target>group|private)\\s*:?\\s*(?P<cid>\\d+)\\s*->\\s*(?P<text>.*)$"
+    }
+  },
+  "ingest": {
+    "enabled": true,
+    "file": "data/ingest.jsonl"
+  },
+  "qr": {
+    "mode": "off",
+    "display": ":1",
+    "user": "",
+    "crop": "",
+    "scale": "",
+    "click": ""
+  },
+  "voice": {
+    "engine": "off",
+    "dir": "",
+    "py": "",
+    "bin": "",
+    "silk_bin": "",
+    "voice": "",
+    "model": "",
+    "speed": "1.08",
+    "pitch": "1.00"
+  }
+}

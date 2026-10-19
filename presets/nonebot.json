@@ -1,0 +1,49 @@
+{
+  "_说明": "NoneBot 系：日志里有 [接收]/[发送] 行。改 service / container / token 就能用",
+  "port": 8090,
+  "token": "change-me-please",
+  "cors": false,
+  "bot_dir": "/opt/qqbot",
+  "service": "fishbot",
+  "container": "snowluma",
+  "health_log": "",
+  "sent_log": "data/manual_sent.log",
+  "onebot": {
+    "http": "http://127.0.0.1:3000",
+    "token": ""
+  },
+  "log": {
+    "source": "journal",
+    "journal_unit": "",
+    "file": "",
+    "since_hours": 6,
+    "max_lines": 800,
+    "patterns": {
+      "in": "\\[接收\\]\\s*(?P<ck>群|私聊)\\s*(?P<cid>\\d+)?\\s*(?P<who>.*?)\\s*->\\s*(?P<text>.*)$",
+      "out": "\\[发送\\]\\s*(?P<target>group|private|群|私聊)\\s*:?\\s*(?P<cid>\\d+)\\s*->\\s*(?P<text>.*)$"
+    }
+  },
+  "ingest": {
+    "enabled": true,
+    "file": "data/ingest.jsonl"
+  },
+  "qr": {
+    "mode": "screen",
+    "display": ":1",
+    "user": "",
+    "crop": "220:220:852:434",
+    "scale": "660:660",
+    "click": "961 581"
+  },
+  "voice": {
+    "engine": "siliconflow",
+    "dir": "/app/data/voice",
+    "py": "/opt/voice/.venv/bin/python",
+    "bin": "/opt/voice/sf_tts.py",
+    "silk_bin": "/opt/voice/to_silk.py",
+    "voice": "",
+    "model": "FunAudioLLM/CosyVoice2-0.5B",
+    "speed": "1.08",
+    "pitch": "1.00"
+  }
+}

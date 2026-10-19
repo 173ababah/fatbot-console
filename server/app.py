@@ -18,15 +18,118 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-TOKEN = os.environ.get("FISHWEB_TOKEN", "fishbot-2026")
-PORT = int(os.environ.get("FISHWEB_PORT", "8090"))
-BOT_DIR = "/opt/qqbot"
-QR_LOCAL = "/tmp/fishweb_qr.png"
-DESKTOP_LOCAL = "/tmp/fishweb_desktop.png"
-BOT_CONTAINER = "snowluma"          # 协议端容器名（原 napcat）
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATIC = os.path.join(HERE, "static")
 
-STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-HEALTH_LOG = "/opt/qqbot/logs/health.log"
+# ---------------------------------------------------------------- 配置
+# 优先级：环境变量 > config.json > 下面这份默认值
+DEFAULTS = {
+    "port": 8090,
+    "token": "change-me-please",
+    "cors": False,                        # 网页版单独托管时打开
+    "bot_dir": "/opt/qqbot",              # 机器人程序目录（放 data/、.env 等）
+    "service": "fishbot",                 # systemd 服务名
+    "container": "",                      # 协议端容器名，空=不用 docker
+    "health_log": "",                     # 看门狗日志，空=不读
+    "sent_log": "",                       # 手动发送日志，空=不读
+    "onebot": {
+        "http": "http://127.0.0.1:3000",
+        "token": ""
+    },
+    "log": {
+        # 日志来源：journal / file / ingest / 组合（journal+ingest 等）
+        "source": "journal",
+        "journal_unit": "",               # 空 = 用 service
+        "file": "",                       # source 含 file 时读这个文件
+        "since_hours": 6,
+        "max_lines": 800,
+        "patterns": {
+            "in":  r"\[接收\]\s*(?P<ck>群|私聊)\s*(?P<cid>\d+)?\s*(?P<who>.*?)\s*->\s*(?P<text>.*)$",
+            "out": r"\[发送\]\s*(?P<target>group|private|群|私聊)\s*:?\s*(?P<cid>\d+)\s*->\s*(?P<text>.*)$"
+        }
+    },
+    "ingest": {
+        "enabled": True,
+        "file": "data/ingest.jsonl"
+    },
+    "qr": {
+        "mode": "screen",                 # screen / off
+        "display": ":1",
+        "user": "",                       # docker exec -u
+        "crop": "220:220:852:434",
+        "scale": "660:660",
+        "click": "961 581"
+    },
+    "voice": {
+        "engine": "siliconflow",          # siliconflow / off
+        "dir": "/app/data/voice",
+        "py": "/opt/voice/.venv/bin/python",
+        "bin": "/opt/voice/sf_tts.py",
+        "silk_bin": "/opt/voice/to_silk.py",
+        "voice": "",
+        "model": "FunAudioLLM/CosyVoice2-0.5B",
+        "speed": "1.08",
+        "pitch": "1.00"
+    }
+}
+
+
+def _deep_merge(base, over):
+    out = dict(base)
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _load_config():
+    path = os.environ.get("FATBOT_CONFIG") or os.path.join(HERE, "config.json")
+    cfg = dict(DEFAULTS)
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            cfg = _deep_merge(cfg, json.load(f))
+    except (OSError, ValueError):
+        pass
+    # 环境变量覆盖（方便用 systemd Environment= 起）
+    if os.environ.get("FATBOT_TOKEN"):
+        cfg["token"] = os.environ["FATBOT_TOKEN"]
+    if os.environ.get("FATBOT_PORT"):
+        cfg["port"] = int(os.environ["FATBOT_PORT"])
+    if os.environ.get("FATBOT_SERVICE"):
+        cfg["service"] = os.environ["FATBOT_SERVICE"]
+    if os.environ.get("FATBOT_CONTAINER"):
+        cfg["container"] = os.environ["FATBOT_CONTAINER"]
+    if os.environ.get("FISH_OB_HTTP"):
+        cfg["onebot"]["http"] = os.environ["FISH_OB_HTTP"]
+    if os.environ.get("FISH_OB_TOKEN"):
+        cfg["onebot"]["token"] = os.environ["FISH_OB_TOKEN"]
+    if os.environ.get("FISH_VOICE_SF_VOICE"):
+        cfg["voice"]["voice"] = os.environ["FISH_VOICE_SF_VOICE"]
+    cfg["config_file"] = path
+    return cfg
+
+
+CFG = _load_config()
+TOKEN = CFG["token"]
+PORT = int(CFG["port"])
+SERVICE = CFG["service"] or ""
+BOT_CONTAINER = CFG["container"] or ""
+BOT_DIR = CFG["bot_dir"]
+QR_LOCAL = "/tmp/fatbot_qr.png"
+DESKTOP_LOCAL = "/tmp/fatbot_desktop.png"
+HEALTH_LOG = CFG["health_log"]
+
+
+def _under(base, rel):
+    return rel if os.path.isabs(rel) else os.path.join(base, rel)
+
+
+SENT_LOG = _under(BOT_DIR, CFG["sent_log"]) if CFG["sent_log"] else ""
+INGEST_FILE = _under(BOT_DIR, CFG["ingest"]["file"]) if CFG["ingest"]["file"] else ""
+QR_CROP = "crop=%s,scale=%s:flags=neighbor" % (CFG["qr"]["crop"], CFG["qr"]["scale"])
+QR_CLICK = CFG["qr"]["click"]
 
 
 def run(cmd, timeout=25):
@@ -44,7 +147,9 @@ SUDO = "sudo -n "
 
 
 def svc_state():
-    return run("systemctl is-active fishbot").strip()
+    if not SERVICE:
+        return "n/a"      # 没配服务名（比如用 ingest 的纯外部机器人）
+    return run("systemctl is-active " + SERVICE).strip()
 
 
 def napcat_running():
@@ -53,7 +158,7 @@ def napcat_running():
 
 
 def last_lines(pat, since="30 min ago", limit=80):
-    q = SUDO + "journalctl -u fishbot --since '%s' --no-pager" % since
+    q = SUDO + "journalctl -u " + SERVICE + " --since '%s' --no-pager" % since
     out = run(q + " | grep -F -e %s | tail -%d" % (pat, limit), timeout=30)
     return [x for x in out.replace("\r", "").split("\n") if x.strip()]
 
@@ -67,7 +172,7 @@ def status():
         mem = "%s/%s MB" % (parts[2], parts[1])
     except Exception:
         mem = ""
-    up = run("systemctl show fishbot -p ActiveEnterTimestamp --value").strip()
+    up = run("systemctl show " + SERVICE + " -p ActiveEnterTimestamp --value").strip()
     conn = 0
     # 一次 journalctl 抓完，别分两次（每次 grep 都要重扫日志，很慢）
     both = last_lines("'[接收]' -e '[发送]'", since="30 min ago", limit=200)
@@ -82,25 +187,36 @@ def status():
     }
 
 
+def _docker(args, timeout=25):
+    """有容器才执行 docker 命令，否则返回空串"""
+    if not BOT_CONTAINER:
+        return ""
+    return run(SUDO + "docker " + args, timeout=timeout)
+
+
 def diag():
     st = status()
     qr_age = -1
-    try:
-        out = run(SUDO + "docker exec napcat sh -c 'stat -c %Y %s'" % QR_IN_CONTAINER, timeout=20)
-        m = re.search(r"(\d{9,})", out)
-        if m:
-            qr_age = int(time.time()) - int(m.group(1))
-    except Exception:
-        pass
-    kick = run(SUDO + "docker logs --since 10m napcat 2>&1 | grep -c KickedOffLine", timeout=25).strip()
-    try:
-        kick = int(kick)
-    except Exception:
-        kick = 0
-    if st["svc"] != "active":
+    kick = 0
+    if BOT_CONTAINER:
+        try:
+            out = _docker("exec %s sh -c 'stat -c %%Y /tmp/fishqr.png' 2>/dev/null" % BOT_CONTAINER, 15)
+            m = re.search(r"(\d{9,})", out or "")
+            if m:
+                qr_age = int(time.time()) - int(m.group(1))
+        except Exception:
+            pass
+        try:
+            cnt = _docker("logs --since 10m %s 2>&1 | grep -c KickedOffLine" % BOT_CONTAINER, 25).strip()
+            kick = int(cnt or 0)
+        except (TypeError, ValueError):
+            kick = 0
+    if not SERVICE:
+        verdict, hint = "已连上控制台（未配置服务名）", "只做转发与记录，不检查 systemd 服务"
+    elif st["svc"] != "active":
         verdict, hint = "不在线：机器人服务停了", "点下面的「启动服务」"
     elif not st["napcat"]:
-        verdict, hint = "不在线：SnowLuma 容器没起来", "点「重启 NapCat」"
+        verdict, hint = "不在线：协议端容器没起来", "点「重启协议端」"
     elif st["tx"] > 0 or st["rx"] > 0:
         verdict, hint = "在线，正在正常收发", ""
     elif kick > 0:
@@ -112,43 +228,58 @@ def diag():
     return {"verdict": verdict, "hint": hint, "qr_age": qr_age, "kick": kick, "status": st}
 
 
-QR_CROP = "crop=220:220:852:434,scale=660:660:flags=neighbor"
-QR_CLICK = "961 581"      # 「刷新」按钮位置（过期时点它换新码）
+
+
+def _exec_in_container(script, timeout=25):
+    """在协议端容器里跑一段 shell（QR/桌面截图用）"""
+    if not BOT_CONTAINER:
+        return ""
+    user = ("-u %s " % CFG["qr"]["user"]) if CFG["qr"]["user"] else ""
+    disp = CFG["qr"]["display"]
+    return run(SUDO + 'docker exec %s-e DISPLAY=%s %s sh -lc "%s"'
+               % (user, disp, BOT_CONTAINER, script), timeout=timeout)
 
 
 def click_qr_refresh():
-    run(SUDO + "docker exec -u snowluma -e DISPLAY=:1 %s sh -lc "
-        "\"xdotool mousemove %s click 1\"" % (BOT_CONTAINER, QR_CLICK), timeout=25)
+    """点一下协议端登录窗里的「刷新」按钮（坐标来自 config.qr.click）"""
+    click = CFG["qr"].get("click") or ""
+    if not click:
+        return
+    _exec_in_container("xdotool mousemove %s click 1" % click, timeout=25)
     time.sleep(2.5)
 
 
-def grab_qr(fresh=False):
-    """从 SnowLuma 容器里的 Linux QQ 窗口截屏，裁出二维码那块。"""
-    if fresh:
-        click_qr_refresh()
-    # 把鼠标挪开，别挡在二维码上
-    run(SUDO + "docker exec -u snowluma -e DISPLAY=:1 %s sh -lc "
-        "\"xdotool mousemove 1500 950\"" % BOT_CONTAINER, timeout=20)
-    run(SUDO + "docker exec -u snowluma -e DISPLAY=:1 %s sh -lc "
-        "\"ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
-        "-vf '%s' -frames:v 1 -y /tmp/fishqr.png\"" % (BOT_CONTAINER, QR_CROP), timeout=40)
-    run(SUDO + "docker cp %s:/tmp/fishqr.png %s" % (BOT_CONTAINER, QR_LOCAL), timeout=20)
-    if os.path.exists(QR_LOCAL) and os.path.getsize(QR_LOCAL) > 2000:
-        with open(QR_LOCAL, "rb") as f:
+def _grab(path_in_container, vf=None, timeout=40):
+    """容器里 ffmpeg 截一张图，拷到本机，返回字节"""
+    vf = ("-vf '%s' " % vf) if vf else ""
+    script = ("ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
+              + vf + "-frames:v 1 -y " + path_in_container)
+    _exec_in_container(script, timeout=timeout)
+    run(SUDO + "docker cp %s:%s %s" % (BOT_CONTAINER, path_in_container,
+                                      QR_LOCAL if "qr" in path_in_container else DESKTOP_LOCAL),
+        timeout=20)
+    dest = QR_LOCAL if "qr" in path_in_container else DESKTOP_LOCAL
+    if os.path.exists(dest) and os.path.getsize(dest) > 2000:
+        with open(dest, "rb") as f:
             return f.read()
     return None
+
+
+def grab_qr(fresh=False):
+    """从协议端容器里的 QQ 窗口截屏，裁出二维码那块（qr.mode=screen 时用）"""
+    if not BOT_CONTAINER:
+        return None
+    if fresh:
+        click_qr_refresh()
+    _exec_in_container("xdotool mousemove 1500 950", timeout=15)   # 鼠标挪开别挡码
+    return _grab("/tmp/fishqr.png", QR_CROP)
 
 
 def grab_desktop():
-    """整个远程桌面（需要手动处理验证码时用）。"""
-    run(SUDO + "docker exec -u snowluma -e DISPLAY=:1 %s sh -lc "
-        "\"ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
-        "-frames:v 1 -y /tmp/fishdesk.png\"" % BOT_CONTAINER, timeout=40)
-    run(SUDO + "docker cp %s:/tmp/fishdesk.png %s" % (BOT_CONTAINER, DESKTOP_LOCAL), timeout=20)
-    if os.path.exists(DESKTOP_LOCAL):
-        with open(DESKTOP_LOCAL, "rb") as f:
-            return f.read()
-    return None
+    """整个远程桌面（需要手动处理验证码/滑块时用）"""
+    if not BOT_CONTAINER:
+        return None
+    return _grab("/tmp/fishdesk.png")
 
 
 def health():
@@ -173,7 +304,7 @@ def env_of_container():
 
 
 def count_lines(pattern, since):
-    out = run(SUDO + "journalctl -u fishbot --since '%s' --no-pager 2>/dev/null | grep -cF %s" % (since, pattern), timeout=25)
+    out = run(SUDO + "journalctl -u " + SERVICE + " --since '%s' --no-pager 2>/dev/null | grep -cF %s" % (since, pattern), timeout=25)
     try:
         return int(out.strip().splitlines()[-1])
     except Exception:
@@ -182,7 +313,7 @@ def count_lines(pattern, since):
 
 def conn_state():
     """最后一个连接相关事件是「已连接」还是「重连中」。"""
-    out = run(SUDO + "journalctl -u fishbot --since '25 min ago' --no-pager 2>/dev/null "
+    out = run(SUDO + "journalctl -u " + SERVICE + " --since '25 min ago' --no-pager 2>/dev/null "
                     "| grep -E 'connected|Trying to reconnect' | tail -1", timeout=25)
     return "connected" in out
 
@@ -204,7 +335,7 @@ def qr_age():
 
 
 def bot_logged_in():
-    """SnowLuma 日志里出现 hook 工作模式 / 收到消息，就算登录成功。"""
+    """日志里出现 hook 工作模式 / 收到消息，就算登录成功。"""
     out = run(SUDO + "docker logs --tail 60 %s 2>&1 | grep -cE 'awaiting login' " % BOT_CONTAINER, timeout=25)
     try:
         waiting = int(out.strip().splitlines()[-1])
@@ -231,9 +362,9 @@ def selfcheck():
     def add(ok, name, detail):
         items.append({"ok": bool(ok), "name": name, "detail": detail})
 
-    add(st["svc"] == "active", "机器人服务 fishbot",
+    add(st["svc"] == "active", "机器人服务 " + SERVICE,
         "运行中" if st["svc"] == "active" else st["svc"])
-    add(st["napcat"], "SnowLuma 容器", "在跑" if st["napcat"] else "没起来")
+    add(st["napcat"], (BOT_CONTAINER or "协议端") + " 容器", "在跑" if st["napcat"] else "没起来")
     add(has_pw, "账号已登录", "已登录（会话保存在容器卷里）" if has_pw else "还没登录，去「扫码」页")
     add(linked, "OneBot 连接",
         "已连上" if linked else ("正在重连（%d 次 / 10 分钟）" % recon if recon else "没有连接记录"))
@@ -245,10 +376,12 @@ def selfcheck():
         ("运行中，已自愈 %d 次" % h["count"]) if h["timer"] == "active" else "没在跑")
 
     busy = (rx5 + tx5) > 0
-    if st["svc"] != "active":
+    if not SERVICE:
+        verdict, hint = "已连上控制台（未配置服务名）", "只做转发与记录，不检查 systemd 服务"
+    elif st["svc"] != "active":
         verdict, hint = "不在线：机器人服务停了", "点下面的「启动服务」"
     elif not st["napcat"]:
-        verdict, hint = "不在线：SnowLuma 容器没起来", "点「重启 NapCat」"
+        verdict, hint = "不在线：协议端容器没起来", "点「重启协议端」"
     elif busy:
         verdict, hint = "在线，正在正常收发", "5 分钟内还说过话，不用管"
     elif (not linked) and recon >= 3 and has_pw:
@@ -266,67 +399,183 @@ def selfcheck():
 
 
 _MSG_CACHE = {"ts": 0.0, "msgs": []}
-MSG_TTL = 15          # 缓存 15 秒，点进会话基本是瞬间出
-MSG_SINCE = "6 hours ago"
-MSG_TAIL = 800
+MSG_TTL = 15
 
 
-def _parse_all(force=False):
-    """解析一次日志，缓存起来（点会话列表/进单聊都复用）"""
-    now = time.time()
-    if not force and _MSG_CACHE["msgs"] and now - _MSG_CACHE["ts"] < MSG_TTL:
-        return _MSG_CACHE["msgs"]
-    lines = last_lines("'[接收]' -e '[发送]'", since=MSG_SINCE, limit=MSG_TAIL)
-    # 手动发送的日志（控制台/手机发的）也要合并进来
+def _log_cfg():
+    return CFG["log"]
+
+
+def _since_arg():
+    h = _log_cfg().get("since_hours", 6) or 6
     try:
-        if os.path.exists(SENT_LOG):
-            with open(SENT_LOG, "r", encoding="utf-8") as f:
-                extra = f.readlines()[-400:]
-            lines = list(lines) + [ln.rstrip("\n") for ln in extra]
-    except Exception:
-        pass
-    msgs = []
-    for ln in lines:
-        ts = ""
-        m = re.search(r"(\d{2}:\d{2}:\d{2})", ln)
-        if m:
-            ts = m.group(1)
-        if "[接收]" in ln:
-            direction = "in"
-            body = ln.split("[接收]", 1)[1].strip()
-        else:
-            direction = "out"
-            body = ln.split("[发送]", 1)[1].strip()
+        h = float(h)
+    except (TypeError, ValueError):
+        h = 6
+    if h <= 24:
+        return "%g hours ago" % h
+    return "%g days ago" % (h / 24.0)
 
+
+def _read_journal(limit):
+    """从 journalctl 读日志行（失败返回空列表）"""
+    unit = _log_cfg().get("journal_unit") or SERVICE
+    if not unit:
+        return []
+    cmd = (SUDO + "journalctl -u " + unit + " --since '" + _since_arg() +
+           "' --no-pager -n " + str(int(limit)) + " 2>/dev/null")
+    out = run(cmd, timeout=40)
+    if not out or out.startswith("（"):
+        return []
+    return [x for x in out.replace("\r", "").split("\n") if x.strip()]
+
+
+def _read_logfile(limit):
+    path = _log_cfg().get("file") or ""
+    if not path:
+        return []
+    path = _under(BOT_DIR, path)
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return [x.rstrip("\n") for x in f.readlines()[-int(limit):] if x.strip()]
+    except OSError:
+        return []
+
+
+def _read_ingest(limit=1500):
+    """机器人主动推过来的事件（JSONL），一条一行"""
+    if not CFG["ingest"].get("enabled", True) or not INGEST_FILE:
+        return []
+    try:
+        with open(INGEST_FILE, "r", encoding="utf-8", errors="ignore") as f:
+            return [x.rstrip("\n") for x in f.readlines()[-int(limit):] if x.strip()]
+    except OSError:
+        return []
+
+
+def _event_from_ingest(obj):
+    """把 ingest 的一条 JSON 变成内部消息格式"""
+    if not isinstance(obj, dict):
+        return None
+    direction = "out" if str(obj.get("dir") or obj.get("direction") or "in").lower() in (
+        "out", "send", "sent", "self") else "in"
+    # chat 支持三种写法：字符串 "群 123" / {"type":"group","id":123} / group_id / user_id
+    chat = obj.get("chat")
+    chat_name = ""
+    if isinstance(chat, dict):
+        t = str(chat.get("type") or "")
+        cid = chat.get("id")
+        chat_name = ("群 " if t in ("group", "群") else "私聊 ") + str(cid or "")
+    elif isinstance(chat, str) and chat.strip():
+        chat_name = re.sub(r"^(group|群):\s*", "群 ", chat.strip())
+        chat_name = re.sub(r"^(private|私聊):\s*", "私聊 ", chat_name)
+    elif obj.get("group_id"):
+        chat_name = "群 " + str(obj["group_id"])
+    elif obj.get("user_id"):
+        chat_name = "私聊 " + str(obj["user_id"])
+
+    text = str(obj.get("text") or obj.get("message") or "")
+    who = str(obj.get("who") or obj.get("nickname") or obj.get("sender") or
+              ("我" if direction == "out" else ""))
+    kind = str(obj.get("kind") or "text")
+    if kind not in ("text", "media"):
         kind = "text"
-        who = ""
-        chat_name = ""
-        text = body
+    ts = str(obj.get("ts") or obj.get("time") or "")
+    m = re.search(r"(\d{2}:\d{2}:\d{2})", ts)
+    if m:
+        ts = m.group(1)
+    elif not ts:
+        ts = time.strftime("%H:%M:%S")
+    return {"dir": direction, "chat": chat_name, "who": who,
+            "text": text[:200], "kind": kind, "ts": ts}
 
-        if direction == "in":
-            m2 = re.match(r"^(群|私聊)\s*(\d+)?\s*(.*?)\s*->\s*(.*)$", body)
-            if m2:
-                chat_name = (m2.group(1) + " " + (m2.group(2) or "")).strip()
-                who = (m2.group(3) or "").strip()
-                text = (m2.group(4) or "").strip()
+
+def _compile_patterns():
+    pats = []
+    for direction, rx in (_log_cfg().get("patterns") or {}).items():
+        try:
+            pats.append((direction, re.compile(rx)))
+        except re.error:
+            continue
+    return pats
+
+
+def _event_from_line(ln, pats):
+    """用配置里的正则把一行日志解析成消息；认不出来返回 None"""
+    ts = ""
+    m = re.search(r"(\d{2}:\d{2}:\d{2})", ln)
+    if m:
+        ts = m.group(1)
+    for direction, rx in pats:
+        mm = rx.search(ln)
+        if not mm:
+            continue
+        g = mm.groupdict()
+        ck = (g.get("ck") or g.get("target") or "").strip()
+        cid = (g.get("cid") or "").strip()
+        if not cid:
+            continue
+        if ck in ("群", "group", "g"):
+            chat_name = "群 " + cid
+        elif ck in ("私聊", "private", "p"):
+            chat_name = "私聊 " + cid
         else:
-            m3 = re.match(r"^(group|private):(\d+)\s*->\s*(.*)$", body)
-            if m3:
-                chat_name = ("群 " + m3.group(2)) if m3.group(1) == "group" else ("私聊 " + m3.group(2))
-                text = (m3.group(3) or "").strip()
-                who = "我"
-            else:
-                m4 = re.match(r"^(群|私聊)\s*(\d+)\s*->\s*(.*)$", body)
-                if m4:
-                    chat_name = (m4.group(1) + " " + m4.group(2)).strip()
-                    text = (m4.group(3) or "").strip()
-                    who = "我"
-
+            chat_name = (ck + " " + cid).strip()
+        who = (g.get("who") or "").strip() or ("我" if direction == "out" else "")
+        text = (g.get("text") or "").strip()
+        kind = "text"
         if "【非文本消息】" in text or text.startswith("【image】") or "【表情包】" in text:
             kind = "media"
             text = "[表情]" if "表情" in text else "[图片]"
-        msgs.append({"dir": direction, "chat": chat_name, "who": who,
-                     "text": text[:200], "kind": kind, "ts": ts})
+        return {"dir": direction, "chat": chat_name, "who": who,
+                "text": text[:200], "kind": kind, "ts": ts}
+    return None
+
+
+def _parse_all(force=False):
+    """把三处来源解析成消息列表：日志（journal/file）+ 手动发送日志 + ingest"""
+    now = time.time()
+    if not force and _MSG_CACHE["msgs"] and now - _MSG_CACHE["ts"] < MSG_TTL:
+        return _MSG_CACHE["msgs"]
+
+    limit = int(_log_cfg().get("max_lines", 800) or 800)
+    source = str(_log_cfg().get("source", "journal")).lower()
+    lines = []
+    if "journal" in source:
+        lines += _read_journal(limit)
+    if "file" in source:
+        lines += _read_logfile(limit)
+
+    pats = _compile_patterns()
+    msgs = []
+    for ln in lines:
+        ev = _event_from_line(ln, pats)
+        if ev:
+            msgs.append(ev)
+
+    # 手动发送日志（控制台/手机发的，保证两端都能看到）
+    if SENT_LOG:
+        try:
+            with open(SENT_LOG, "r", encoding="utf-8", errors="ignore") as f:
+                for ln in f.readlines()[-400:]:
+                    ev = _event_from_line(ln.rstrip("\n"), pats)
+                    if ev:
+                        ev["dir"] = "out"
+                        msgs.append(ev)
+        except OSError:
+            pass
+
+    # 机器人主动推过来的事件
+    for ln in _read_ingest():
+        try:
+            ev = _event_from_ingest(json.loads(ln))
+        except ValueError:
+            continue
+        if ev:
+            msgs.append(ev)
+
+    # 按时间戳排序（只有 HH:MM:SS，够用；同一秒保持原顺序）
+    msgs.sort(key=lambda m: m.get("ts") or "")
     _MSG_CACHE["msgs"] = msgs
     _MSG_CACHE["ts"] = now
     return msgs
@@ -359,9 +608,8 @@ def conversations(limit=300):
 
 
 
-OB_HTTP = os.environ.get("FISH_OB_HTTP", "http://127.0.0.1:3000")
-OB_TOKEN = os.environ.get("FISH_OB_TOKEN",
-                          "CHANGE_ME_ONEBOT_TOKEN")
+OB_HTTP = CFG["onebot"]["http"].rstrip("/")
+OB_TOKEN = CFG["onebot"]["token"]
 
 
 def ob_call(action, payload, timeout=25):
@@ -377,7 +625,64 @@ def ob_call(action, payload, timeout=25):
 
 
 
-SENT_LOG = "/opt/qqbot/data/manual_sent.log"
+# SENT_LOG / INGEST_FILE 见文件顶部
+
+
+def ingest_write(items):
+    """接收外部机器人推来的事件，追加成 JSONL；返回写入条数"""
+    if not CFG["ingest"].get("enabled", True) or not INGEST_FILE:
+        return 0, "ingest 未启用"
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list):
+        return 0, "需要对象或数组"
+    n = 0
+    try:
+        os.makedirs(os.path.dirname(INGEST_FILE), exist_ok=True)
+        with open(INGEST_FILE, "a", encoding="utf-8") as f:
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                rec = dict(it)
+                if not rec.get("ts"):
+                    rec["ts"] = time.strftime("%H:%M:%S")
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                n += 1
+    except OSError as e:
+        return n, "写入失败：%s" % e
+    _MSG_CACHE["ts"] = 0          # 让缓存立刻失效
+    return n, ""
+
+
+def info():
+    """给使用者看的「我接的是谁」信息（不含密钥）"""
+    try:
+        _parse_all()          # 顺便算一下现在能读到多少消息
+    except Exception:
+        pass
+    return {
+        "service": SERVICE,
+        "container": BOT_CONTAINER or None,
+        "onebot": OB_HTTP,
+        "port": PORT,
+        "config_file": CFG.get("config_file"),
+        "log": {
+            "source": _log_cfg().get("source"),
+            "journal_unit": _log_cfg().get("journal_unit") or SERVICE or None,
+            "file": _log_cfg().get("file") or None,
+            "since_hours": _log_cfg().get("since_hours"),
+            "max_lines": _log_cfg().get("max_lines"),
+            "patterns": list((_log_cfg().get("patterns") or {}).keys()),
+        },
+        "ingest": {"enabled": CFG["ingest"].get("enabled", True), "file": INGEST_FILE},
+        "sent_log": SENT_LOG or None,
+        "qr": {"mode": CFG["qr"].get("mode")},
+        "voice": {"engine": CFG["voice"].get("engine"), "dir": VOICE_DIR_IN_CONTAINER},
+        "counts": {
+            "messages": len(_MSG_CACHE["msgs"]),
+            "conversations": len({m["chat"] for m in _MSG_CACHE["msgs"]}),
+        },
+    }
 
 
 def log_sent(chat, text, voice=False):
@@ -423,15 +728,14 @@ def send_message(chat, text):
 
 
 
-VOICE_DIR_IN_CONTAINER = "/app/data/voice"
-SF_PY = "/opt/voice/.venv/bin/python"
-SF_BIN = "/opt/voice/sf_tts.py"
-SF_VOICE = os.environ.get("FISH_VOICE_SF_VOICE",
-                          "speech:diona:db65ukk50mis739gtebg:wtktidljanikamlvhyaw")
-SF_MODEL = "FunAudioLLM/CosyVoice2-0.5B"
-SF_SPEED = os.environ.get("FISH_VOICE_SF_SPEED", "1.08")
-SF_PITCH = os.environ.get("FISH_VOICE_SF_PITCH", "1.00")
-SF_SILK_BIN = "/opt/voice/to_silk.py"
+VOICE_DIR_IN_CONTAINER = CFG["voice"]["dir"]
+SF_PY = CFG["voice"]["py"]
+SF_BIN = CFG["voice"]["bin"]
+SF_VOICE = CFG["voice"]["voice"]
+SF_MODEL = CFG["voice"]["model"]
+SF_SPEED = CFG["voice"]["speed"]
+SF_PITCH = CFG["voice"]["pitch"]
+SF_SILK_BIN = CFG["voice"]["silk_bin"]
 VOICE_LANG_CONSOLE = os.environ.get("FISH_VOICE_LANG", "zh")
 
 
@@ -439,7 +743,7 @@ def _sf_key():
     if os.environ.get("FISH_SF_KEY"):
         return os.environ["FISH_SF_KEY"]
     try:
-        with open("/opt/qqbot/.env", "r", encoding="utf-8") as f:
+        with open(os.path.join(BOT_DIR, ".env"), "r", encoding="utf-8") as f:
             for ln in f:
                 if ln.startswith("FISH_SF_KEY="):
                     return ln.split("=", 1)[1].strip()
@@ -452,7 +756,7 @@ def _sf_key():
 def _ai_env():
     env = {}
     try:
-        with open("/opt/qqbot/.env", "r", encoding="utf-8") as f:
+        with open(os.path.join(BOT_DIR, ".env"), "r", encoding="utf-8") as f:
             for ln in f:
                 ln = ln.strip()
                 if "=" in ln and not ln.startswith("#"):
@@ -601,13 +905,13 @@ def send_voice(chat, text):
 
 def action(name):
     if name == "start":
-        return run(SUDO + "systemctl start fishbot", timeout=60) or "已启动"
+        return run(SUDO + "systemctl start " + SERVICE, timeout=60) or "已启动"
     if name == "restart":
-        return run(SUDO + "systemctl restart fishbot", timeout=60) or "已重启"
+        return run(SUDO + "systemctl restart " + SERVICE, timeout=60) or "已重启"
     if name == "stop":
-        run("touch /opt/qqbot/data/stop.flag", timeout=10)
+        run("touch " + os.path.join(BOT_DIR, "data", "stop.flag"), timeout=10)
         time.sleep(11)
-        return run(SUDO + "systemctl stop fishbot", timeout=60) or "已关闭（发过告别）"
+        return run(SUDO + "systemctl stop " + SERVICE, timeout=60) or "已关闭（发过告别）"
     if name in ("napcat-restart", "bot-restart"):
         return run(SUDO + "docker restart " + BOT_CONTAINER, timeout=120) or "协议端重启中（约 30 秒）"
     if name == "qr-refresh":
@@ -630,6 +934,19 @@ class Handler(BaseHTTPRequestHandler):
             tok = self.headers.get("X-Token", "")
         return hmac.compare_digest(tok, TOKEN)
 
+    def _cors(self):
+        """允许跨域（网页版单独托管时用；config 里 cors=true 才开）"""
+        if not CFG.get("cors"):
+            return
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Token")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.end_headers()
+
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         if isinstance(body, (dict, list)):
             body = json.dumps(body, ensure_ascii=False).encode()
@@ -639,6 +956,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._cors()
         self.end_headers()
         self.wfile.write(body)
 
@@ -679,6 +997,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, selfcheck())
         if path == "/api/health":
             return self._send(200, health())
+        if path == "/api/info":
+            return self._send(200, info())
         if path == "/api/messages":
             limit = int(q.get("limit", ["120"])[0])
             chat = (q.get("chat", [""])[0] or "").strip() or None
@@ -689,14 +1009,18 @@ class Handler(BaseHTTPRequestHandler):
             lines = last_lines("'[接收]' -e '[发送]'", since="60 min ago", limit=120)
             return self._send(200, {"lines": lines})
         if path == "/api/runlog":
-            out = run(SUDO + "journalctl -u fishbot --since '40 min ago' --no-pager | tail -120", timeout=30)
+            out = run(SUDO + "journalctl -u " + SERVICE + " --since '40 min ago' --no-pager | tail -120", timeout=30)
             return self._send(200, {"text": out})
         if path == "/api/desktop":
+            if str(CFG["qr"].get("mode", "screen")).lower() == "off":
+                return self._send(501, {"error": "qr.mode=off"})
             data = grab_desktop()
             if not data:
                 return self._send(404, {"error": "没有截图"})
             return self._send(200, data, "image/png")
         if path == "/api/qr":
+            if str(CFG["qr"].get("mode", "screen")).lower() == "off":
+                return self._send(501, {"error": "qr.mode=off（协议端不支持截屏取码，请用该协议端自己的接口）"})
             data = grab_qr(fresh=(q.get("fresh", ["0"])[0] == "1"))
             if not data:
                 return self._send(404, {"error": "没有二维码"})
@@ -715,6 +1039,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         path = u.path
+        if path == "/api/ingest":
+            items = body.get("events") if isinstance(body.get("events"), list) else body
+            n, err = ingest_write(items)
+            if err:
+                return self._send(400, {"ok": False, "msg": err, "written": n})
+            return self._send(200, {"ok": True, "written": n})
         if path == "/api/send":
             chat = (body.get("chat") or "").strip()
             text = body.get("text") or ""
@@ -728,8 +1058,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    print("fatbot-console on :%d" % PORT, flush=True)
+    print("  配置      : %s" % CFG.get("config_file"), flush=True)
+    print("  服务/容器 : %s / %s" % (SERVICE, BOT_CONTAINER or "（无）"), flush=True)
+    print("  OneBot    : %s" % OB_HTTP, flush=True)
+    print("  日志来源  : %s" % _log_cfg().get("source"), flush=True)
+    print("  ingest    : %s" % (INGEST_FILE or "关闭"), flush=True)
+    if TOKEN in ("change-me-please", "change-me", ""):
+        print("  ⚠ token 还是默认值，请改 config.json 的 token（或用 FATBOT_TOKEN）", flush=True)
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print("fishweb on :%d" % PORT, flush=True)
     srv.serve_forever()
 
 
