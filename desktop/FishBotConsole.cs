@@ -1899,6 +1899,7 @@ namespace FishBotConsole
             bool onlyAt = false;
             int maxLen = 26;
             double speed = 1.0;
+            double chatRate = -1.0;      // -1 = 跟随全局
 
             // ---------- 选群 ----------
             var c1 = FlexCard("选一个群");
@@ -1974,6 +1975,38 @@ namespace FishBotConsole
             rowSp.Controls.Add(lbSpVal);
             Body(c2).Controls.Add(Txt("1.00x 是默认；小于 1 更快（0.3 最快），大于 1 更慢（3.0 最慢）。", 9f, false, _th.Sub));
 
+            // 聊天频率
+            var rowRate = Line(Body(c2));
+            rowRate.WrapContents = true;
+            var lbRate = Txt("聊天频率", 9.5f, false, _th.Text);
+            lbRate.AutoSize = false;
+            lbRate.Width = Sc(120);
+            lbRate.Height = Sc(30);
+            lbRate.TextAlign = ContentAlignment.MiddleLeft;
+            rowRate.Controls.Add(lbRate);
+            var barRate = new TrackBar();
+            barRate.Minimum = 0;
+            barRate.Maximum = 100;
+            barRate.TickFrequency = 10;
+            barRate.Value = 100;
+            barRate.Width = Math.Max(Sc(220), _cardW - Sc(430));
+            barRate.Height = Sc(34);
+            barRate.BackColor = _th.Card;
+            rowRate.Controls.Add(barRate);
+            var lbRateVal = Txt("跟随全局", 9.5f, true, _th.Accent);
+            lbRateVal.AutoSize = false;
+            lbRateVal.Width = Sc(90);
+            lbRateVal.Height = Sc(30);
+            lbRateVal.TextAlign = ContentAlignment.MiddleLeft;
+            lbRateVal.Margin = new Padding(Sc(8), 0, 0, 0);
+            rowRate.Controls.Add(lbRateVal);
+            var btnRateClear = SoftBtn("跟随全局");
+            btnRateClear.Width = Sc(88);
+            btnRateClear.Margin = new Padding(Sc(6), 0, 0, 0);
+            rowRate.Controls.Add(btnRateClear);
+            Body(c2).Controls.Add(Txt("她在这个群「没人叫她」时主动接话的概率：0% 几乎不插话，100% 每条都想插一句。"
+                + "拖到最左再点「跟随全局」= 用全局设置。", 9f, false, _th.Sub));
+
             // 句式长度
             var rowLen = Line(Body(c2));
             rowLen.WrapContents = false;
@@ -2034,6 +2067,24 @@ namespace FishBotConsole
                 };
                 mark(btn14, maxLen == 14); mark(btn26, maxLen == 26); mark(btn40, maxLen == 40);
             };
+            Action refreshRate = () =>
+            {
+                if (chatRate < 0)
+                {
+                    lbRateVal.Text = "（全局）";
+                    barRate.Enabled = false;
+                }
+                else
+                {
+                    lbRateVal.Text = ((int)Math.Round(chatRate * 100)) + "%";
+                    barRate.Enabled = true;
+                    int v = (int)Math.Round(chatRate * 100);
+                    if (v < barRate.Minimum) v = barRate.Minimum;
+                    if (v > barRate.Maximum) v = barRate.Maximum;
+                    if (barRate.Value != v) barRate.Value = v;
+                }
+            };
+
             Action refreshSpeed = () =>
             {
                 lbSpVal.Text = speed.ToString("0.00") + "x";
@@ -2057,8 +2108,9 @@ namespace FishBotConsole
                         if (maxLen <= 0) maxLen = 26;
                         speed = Convert.ToDouble(r.ContainsKey("speed") ? r["speed"] : 1.0);
                         if (speed <= 0) speed = 1.0;
+                        chatRate = Convert.ToDouble(r.ContainsKey("chat_rate") ? r["chat_rate"] : -1.0);
                     }
-                    refreshAt(); refreshLen(); refreshSpeed();
+                    refreshAt(); refreshLen(); refreshSpeed(); refreshRate();
                 }
                 catch (Exception ex) { status.Text = "解析失败：" + ex.Message; }
             };
@@ -2120,6 +2172,12 @@ namespace FishBotConsole
             btn26.Click += (s2, e2) => { maxLen = 26; refreshLen(); };
             btn40.Click += (s2, e2) => { maxLen = 40; refreshLen(); };
             bar.Scroll += (s2, e2) => { speed = bar.Value / 100.0; refreshSpeed(); };
+            barRate.Scroll += (s2, e2) =>
+            {
+                chatRate = barRate.Value / 100.0;
+                lbRateVal.Text = barRate.Value + "%";
+            };
+            btnRateClear.Click += (s2, e2) => { chatRate = -1.0; refreshRate(); };
             groupBox.SelectedIndexChanged += (s2, e2) =>
             {
                 var gi = groupBox.SelectedItem as GroupItem;
@@ -2145,7 +2203,8 @@ namespace FishBotConsole
                 if (string.IsNullOrEmpty(curChat)) { status.Text = "先选一个群。"; return; }
                 btnSave.Enabled = false;
                 status.Text = "保存中…";
-                bool _at = onlyAt; int _len = maxLen; double _sp = speed; string _chat = curChat;
+                bool _at = onlyAt; int _len = maxLen; double _sp = speed;
+                double _cr = chatRate; string _chat = curChat;
                 new Thread(() =>
                 {
                     var payload = new Dictionary<string, object>();
@@ -2153,6 +2212,7 @@ namespace FishBotConsole
                     payload["only_at"] = _at;
                     payload["max_len"] = _len;
                     payload["speed"] = Math.Round(_sp, 2);
+                    payload["chat_rate"] = Math.Round(_cr, 2);
                     string body = new JavaScriptSerializer().Serialize(payload);
                     string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(body));
                     string cmd = "echo " + b64 + " | base64 -d > /tmp/botctl.json; "
@@ -2170,6 +2230,7 @@ namespace FishBotConsole
                             status.Text = ok
                                 ? "已保存：" + _chat + " → 仅@" + (_at ? "开" : "关")
                                   + "，长度 " + _len + "，速度 " + _sp.ToString("0.00") + "x"
+                                  + "，频率 " + (_cr < 0 ? "跟随全局" : ((int)Math.Round(_cr * 100)) + "%")
                                 : ("保存失败：" + (o.ContainsKey("msg") ? Convert.ToString(o["msg"]) : r));
                             if (ok) applyRules(r);
                         }
@@ -2178,7 +2239,7 @@ namespace FishBotConsole
                 }) { IsBackground = true }.Start();
             };
 
-            refreshAt(); refreshLen(); refreshSpeed();
+            refreshAt(); refreshLen(); refreshSpeed(); refreshRate();
             page.HandleCreated += (s2, e2) => { if (groupBox.Items.Count == 0) loadGroups(); };
             return page;
         }

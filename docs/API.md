@@ -134,6 +134,7 @@ curl "http://127.0.0.1:8090/api/info?token=<TOKEN>"
 | `only_at` | bool | 只在她被 @ 时回复 |
 | `max_len` | int | 回复最大字数（超出截断），常用 14 / 26 / 40 |
 | `speed` | float | 回复速度倍率：1.0 默认，<1 更快，>1 更慢（0.3~3.0） |
+| `chat_rate` | float | 聊天频率：没人叫她时主动接话的概率 0~1；`-1` = 跟随全局 |
 
 ```bash
 # 读
@@ -147,7 +148,7 @@ curl -X POST "http://127.0.0.1:8090/api/botctl?token=<TOKEN>" \
 
 ```json
 {"ok": true, "chat": "群 123456789", "gid": "123456789",
- "rules": {"only_at": true, "max_len": 26, "speed": 1.2}}
+ "rules": {"only_at": true, "max_len": 26, "speed": 1.2, "chat_rate": 0.3}}
 ```
 
 只有**群**有这些规则（私聊读不到、写不了）。

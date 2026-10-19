@@ -949,7 +949,7 @@ def _rules_save(d):
         return False, str(e)
 
 
-DEFAULT_BOTCTL = {"only_at": False, "max_len": 26, "speed": 1.0}
+DEFAULT_BOTCTL = {"only_at": False, "max_len": 26, "speed": 1.0, "chat_rate": -1.0}
 
 
 def _gid_of_chat(chat):
@@ -981,6 +981,10 @@ def groups_list():
         g["only_at"] = bool(r.get("only_at", False))
         g["max_len"] = int(r.get("max_len", 0) or 0)
         try:
+            g["chat_rate"] = float(r.get("chat_rate", -1.0))
+        except (TypeError, ValueError):
+            g["chat_rate"] = -1.0
+        try:
             g["speed"] = float(r.get("speed", 1.0) or 1.0)
         except (TypeError, ValueError):
             g["speed"] = 1.0
@@ -1000,6 +1004,10 @@ def botctl_get(chat):
         cur["speed"] = float(r.get("speed", 1.0) or 1.0)
     except (TypeError, ValueError):
         cur["speed"] = 1.0
+    try:
+        cur["chat_rate"] = float(r.get("chat_rate", -1.0))
+    except (TypeError, ValueError):
+        cur["chat_rate"] = -1.0
     return {"ok": True, "chat": chat, "gid": gid, "rules": cur}
 
 
@@ -1027,6 +1035,15 @@ def botctl_set(body):
         except (TypeError, ValueError):
             sp = 1.0
         rec["speed"] = max(0.2, min(5.0, round(sp, 2)))
+    if "chat_rate" in body:
+        try:
+            cr = float(body.get("chat_rate"))
+        except (TypeError, ValueError):
+            cr = -1.0
+        if cr < 0:
+            rec.pop("chat_rate", None)        # -1 = 跟随全局
+        else:
+            rec["chat_rate"] = max(0.0, min(1.0, round(cr, 2)))
     ok, err = _rules_save(data)
     if not ok:
         return {"ok": False, "msg": "保存失败：%s" % err}
