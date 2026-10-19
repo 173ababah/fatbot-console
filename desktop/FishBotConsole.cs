@@ -475,15 +475,15 @@ namespace FishBotConsole
     {
         public string Host = "your-server.example.com";
         public string User = "ubuntu";
-        public string Pass = "Hdw173049dshbot";
-        public string HostKey = "SHA256:TC+3bhPZy5VouQ7KsCHwXdV7uRgVkM9ej4e8bqKaHPA";
+        public string Pass = "CHANGE_ME_SSH_PASSWORD";
+        public string HostKey = "SHA256:CHANGE_ME_HOST_KEY";
         public string VBox = @"C:\Program Files\Oracle\VirtualBox\VBoxManage.exe";
         public string VmName = "QQbot-Win11";
         public string VmUser = "qqbot";
-        public string VmPass = "Qqbot@2024";
+        public string VmPass = "CHANGE_ME_VM_PASSWORD";
         public bool Dark = true;
         public float Scale = 1.0f;
-        public string WebuiToken = "3bad0b04624d";   // SnowLuma WebUI 端口（5099）不需要 token
+        public string WebuiToken = "CHANGE_ME_WEBUI_TOKEN";   // SnowLuma WebUI 端口（5099）不需要 token
         // 托盘
         public bool Tray = true;        // 最小化时收进托盘
         public bool TrayClose = true;   // 点关闭收进托盘（不退出）
