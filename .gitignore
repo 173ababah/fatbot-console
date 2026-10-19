@@ -1,4 +1,6 @@
 # 编译产物
+__pycache__/
+*.pyc
 *.exe
 *.apk
 *.dll

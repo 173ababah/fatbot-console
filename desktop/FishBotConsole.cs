@@ -476,7 +476,7 @@ namespace FishBotConsole
         public string Host = "your-server.example.com";
         public string User = "ubuntu";
         public string Pass = "CHANGE_ME_SSH_PASSWORD";
-        public string HostKey = "SHA256:CHANGE_ME_HOST_KEY";
+        public string HostKey = "CHANGE_ME_HOSTKEY";
         public string VBox = @"C:\Program Files\Oracle\VirtualBox\VBoxManage.exe";
         public string VmName = "QQbot-Win11";
         public string VmUser = "qqbot";
@@ -2970,7 +2970,7 @@ namespace FishBotConsole
             return "echo SVC=$(systemctl is-active fishbot 2>/dev/null); "
                  + "echo NAP=$(sudo -n docker inspect -f '{{.State.Running}}' snowluma 2>/dev/null | grep -c true); "
                  + "echo RESTART=$(sudo -n docker inspect snowluma --format '{{.RestartCount}}' 2>/dev/null || echo 0); "
-                 + "echo LOGINOK=$(curl -s -m 6 -H 'Authorization: Bearer mbVTYSJGtMmi9LkNF_t2QjJLlX9pQhqyoGOPtINfzAE' "
+                 + "echo LOGINOK=$(curl -s -m 6 -H 'Authorization: Bearer CHANGE_ME_ONEBOT_TOKEN' "
                  + "http://127.0.0.1:3000/get_login_info 2>/dev/null | grep -c '\"status\":\"ok\"'); "
                  + "echo RX3=$(journalctl -u fishbot --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
                  + "echo TX3=$(journalctl -u fishbot --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[发送]'); "
@@ -3501,14 +3501,25 @@ namespace FishBotConsole
                 using (var fP = new Font("Microsoft YaHei UI", 8F))
                 using (var fT = new Font("Microsoft YaHei UI", 7.5F))
                 {
-                    using (var br = new SolidBrush(txt))
-                        g.DrawString(it.Name, fN, br, bounds.X + Sc(60), bounds.Y + Sc(11));
+                    // 群名可能很长，先量出时间占的宽度，名字超了就省略号（以前会压到时间上）
                     var tsz = g.MeasureString(it.Time, fT);
                     using (var br = new SolidBrush(sub))
                         g.DrawString(it.Time, fT, br, bounds.Right - tsz.Width - Sc(12), bounds.Y + Sc(12));
+
+                    var nf = new StringFormat();
+                    nf.Trimming = StringTrimming.EllipsisCharacter;
+                    nf.FormatFlags = StringFormatFlags.NoWrap;
+                    float nameX = bounds.X + Sc(60);
+                    float nameW = Math.Max(Sc(40), (bounds.Right - tsz.Width - Sc(18)) - nameX);
+                    using (var br = new SolidBrush(txt))
+                        g.DrawString(it.Name, fN, br, new RectangleF(nameX, bounds.Y + Sc(11), nameW, Sc(18)), nf);
+
+                    var pf = new StringFormat();
+                    pf.Trimming = StringTrimming.EllipsisCharacter;
+                    pf.FormatFlags = StringFormatFlags.NoWrap;
                     using (var br = new SolidBrush(sub))
                         g.DrawString(it.Preview, fP, br,
-                            new RectangleF(bounds.X + Sc(60), bounds.Y + Sc(33), bounds.Width - Sc(72), Sc(20)));
+                            new RectangleF(bounds.X + Sc(60), bounds.Y + Sc(33), bounds.Width - Sc(72), Sc(20)), pf);
                 }
             };
 
@@ -3534,17 +3545,18 @@ namespace FishBotConsole
                         {
                             var d = o as Dictionary<string, object>;
                             var it = new ConvItem();
-                            it.Name = Convert.ToString(d["chat"]);
+                            it.Key = Convert.ToString(d["chat"]);
+                            string title = d.ContainsKey("title") ? Convert.ToString(d["title"]) : "";
+                            it.Name = string.IsNullOrEmpty(title) ? it.Key : title;
                             it.Time = Convert.ToString(d["ts"]);
                             it.Count = Convert.ToInt32(d["count"]);
                             string last = Convert.ToString(d["last"]);
                             if (last.StartsWith("【")) last = last.Contains("表情") ? "[表情]" : "[图片]";
-                            it.Preview = last;
-                            if (it.Name.StartsWith("群")) it.Initial = "群";
-                            else if (it.Name.StartsWith("私聊")) it.Initial = "私";
-                            else it.Initial = "?";
+                            string dir = d.ContainsKey("dir") ? Convert.ToString(d["dir"]) : "";
+                            it.Preview = (dir == "out" ? "我：" : "") + last;
+                            it.Initial = it.Name.Length > 0 ? it.Name.Substring(0, 1) : "?";
                             int h = 0;
-                            foreach (char ch in it.Name) h = (h * 31 + ch) & 0x7fffffff;
+                            foreach (char ch in it.Key) h = (h * 31 + ch) & 0x7fffffff;
                             it.AvatarColor = palette[h % palette.Length];
                             items.Add(it);
                         }
@@ -3562,7 +3574,7 @@ namespace FishBotConsole
                             for (int k = 0; k < list.Items.Count; k++)
                             {
                                 var ci = list.Items[k] as ConvItem;
-                                if (ci != null && ci.Name == keep) { idx = k; break; }
+                                if (ci != null && ci.Key == keep) { idx = k; break; }
                             }
                         if (idx >= 0)
                         {
@@ -3583,7 +3595,7 @@ namespace FishBotConsole
                 if (q == "搜索会话…") q = "";
                 list.Items.Clear();
                 foreach (var it in all)
-                    if (q.Length == 0 || it.Name.IndexOf(q) >= 0 || it.Preview.IndexOf(q) >= 0)
+                    if (q.Length == 0 || it.Name.IndexOf(q) >= 0 || it.Preview.IndexOf(q) >= 0 || it.Key.IndexOf(q) >= 0)
                         list.Items.Add(it);
             };
 
@@ -3621,8 +3633,8 @@ namespace FishBotConsole
                 list.Invalidate();          // 关键：整表重绘，否则旧行的高亮擦不掉
                 var it = list.SelectedItem as ConvItem;
                 if (it == null) return;
-                bool changed = current != it.Name;
-                current = it.Name;
+                bool changed = current != it.Key;
+                current = it.Key;
                 headName.Text = it.Name;
                 headSub.Text = it.Count + " 条消息";
                 if (changed) reloadMsgs();
@@ -3709,7 +3721,8 @@ namespace FishBotConsole
 
         class ConvItem
         {
-            public string Name = "";
+            public string Key = "";        // 会话 key：「群 123456」/「私聊 789」（接口用）
+            public string Name = "";       // 显示名：群名 / 好友昵称
             public string Time = "";
             public string Preview = "";
             public string Initial = "?";

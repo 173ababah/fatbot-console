@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -102,7 +103,8 @@ public class MainActivity extends Activity {
     TextView voiceToggle;
     final String[] QUICK = {"我回来啦", "我去吃饭了", "晚安", "在忙吗"};
     LinearLayout convCard, chatCardView;
-    String chatTarget = null;
+    String chatTarget = null;      // 会话 key：「群 123456」/「私聊 789」
+    String chatTitle = null;       // 显示用的名字（群名 / 好友昵称）
     Runnable chatPoll = null;
     ScrollView rootScroll;
     boolean logMsg = true;      // true=聊天气泡  false=运行日志
@@ -150,7 +152,7 @@ public class MainActivity extends Activity {
         root.setPadding(pad, dp(18) + statusBarHeight(), pad, dp(24));
 
         root.addView(text("肥鱼控制台", 26, C_TXT, true));
-        TextView sub = text("原生安卓版 · 协议端（SnowLuma / NapCat 等）", 13, C_SUB, false);
+        TextView sub = text("原生安卓版 · 协议端 SnowLuma", 13, C_SUB, false);
         sub.setPadding(0, dp(2), 0, dp(14));
         root.addView(sub);
 
@@ -808,11 +810,11 @@ public class MainActivity extends Activity {
                 logMsg = msg;
                 paintTab(logTabMsg, msg);
                 paintTab(logTabRun, !msg);
-                if (msg) { showConvList(); loadConversations(); }
+                if (msg) { showConvList(); loadConversations(); startChatPoll(); }
                 else { if (convCard != null) convCard.setVisibility(View.GONE);
                        if (chatCardView != null) chatCardView.setVisibility(View.GONE);
                        View rc = findRunCard(); if (rc != null) rc.setVisibility(View.VISIBLE);
-                       loadLogs(); }
+                       loadLogs(); stopChatPoll(); }
             }
         });
         return t;
@@ -938,7 +940,8 @@ public class MainActivity extends Activity {
                    if (chatCardView != null) chatCardView.setVisibility(View.GONE);
                    View rc = findRunCard(); if (rc != null) rc.setVisibility(View.VISIBLE);
                    loadLogs(); }
-        }
+            startChatPoll();
+        } else stopChatPoll();
     }
 
     void paintTab(TextView t, boolean on) {
@@ -1217,11 +1220,16 @@ public class MainActivity extends Activity {
         stopChatPoll();
         chatPoll = new Runnable() {
             public void run() {
-                if (chatTarget != null) loadMessages();
-                ui.postDelayed(this, 20000);
+                if (chatTarget != null) {
+                    loadMessages();                                   // 聊天里：5 秒同步一次
+                    ui.postDelayed(this, 5000);
+                } else {
+                    if (logMsg && curTab == 4) loadConversations();   // 会话列表：12 秒刷一次
+                    ui.postDelayed(this, 12000);
+                }
             }
         };
-        ui.postDelayed(chatPoll, 20000);
+        ui.postDelayed(chatPoll, chatTarget != null ? 5000 : 12000);
     }
 
     void stopChatPoll() {
@@ -1229,22 +1237,29 @@ public class MainActivity extends Activity {
         chatPoll = null;
     }
 
-    void openChat(String chat) {
+    void openChat(String chat, String title) {
         chatTarget = chat;
+        chatTitle = (title == null || title.length() == 0) ? chat : title;
         if (convCard != null) convCard.setVisibility(View.GONE);
         if (chatCardView != null) chatCardView.setVisibility(View.VISIBLE);
-        try {
-            TextView t = (TextView) chatCardView.findViewWithTag("chattitle");
-            if (t != null) t.setText(chat);
-        } catch (Exception e) { }
+        setChatTitle(chatTitle);
         loadMessages();
         startChatPoll();
     }
 
+    void setChatTitle(String s) {
+        if (chatCardView == null) return;
+        try {
+            TextView t = (TextView) chatCardView.findViewWithTag("chattitle");
+            if (t != null) t.setText(s);
+        } catch (Exception e) { }
+    }
+
     void closeChat() {
-        stopChatPoll();
+        chatTarget = null;
         showConvList();
         loadConversations();
+        startChatPoll();
     }
 
     String cacheGet(String key) {
@@ -1255,6 +1270,21 @@ public class MainActivity extends Activity {
         try { prefs.edit().putString("c_" + key, val).apply(); } catch (Exception e) { }
     }
 
+    // 会话头像配色（跟电脑端一致：同一个 key 颜色固定）
+    static final int[] AVA = {0xFF3F6AEF, 0xFF4CAF50, 0xFFF57C00, 0xFF9C27B0, 0xFFE91E63, 0xFF00ACC1};
+
+    int avatarColor(String key) {
+        int h = 0;
+        for (int i = 0; i < key.length(); i++) h = (h * 31 + key.charAt(i)) & 0x7fffffff;
+        return AVA[h % AVA.length];
+    }
+
+    String hhmm(String ts) {
+        if (ts == null) return "";
+        return ts.length() >= 5 ? ts.substring(0, 5) : ts;
+    }
+
+    /** QQ 风格的会话列表：圆圈头像 + 名字 + 最后一句 + 时间 / 条数 */
     void renderConversations(JSONArray arr) {
         convBox.removeAllViews();
         if (arr == null || arr.length() == 0) {
@@ -1264,35 +1294,78 @@ public class MainActivity extends Activity {
         for (int i = 0; i < arr.length(); i++) {
             try {
                 JSONObject it = arr.getJSONObject(i);
-                final String name = it.optString("chat");
+                final String key = it.optString("chat");
+                String title = it.optString("title", key);
+                if (title == null || title.length() == 0) title = key;
+                final String showTitle = title;
                 String last = it.optString("last");
                 if (last.startsWith("【")) last = last.contains("表情") ? "[表情]" : "[图片]";
-                LinearLayout row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.VERTICAL);
-                row.setPadding(dp(10), dp(8), dp(10), dp(8));
-                row.setBackground(roundBg(0xFF1F2227, 0, 10));
+                if ("out".equals(it.optString("dir"))) last = "我：" + last;
+                int count = it.optInt("count");
+
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(4), dp(10), dp(4), dp(10));
+                row.setBackground(roundBg(0, 0, 10));
                 row.setOnClickListener(new View.OnClickListener() {
-                    public void onClick(View v) { openChat(name); }
+                    public void onClick(View v) { openChat(key, showTitle); }
                 });
-                LinearLayout top = new LinearLayout(MainActivity.this);
-                top.setOrientation(LinearLayout.HORIZONTAL);
-                top.setGravity(Gravity.CENTER_VERTICAL);
-                TextView t1 = text(name, 14, C_TXT, true);
-                LinearLayout.LayoutParams t1lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-                t1.setLayoutParams(t1lp);
-                top.addView(t1);
-                TextView t2 = text(it.optString("ts") + "  " + it.optInt("count") + "条", 10, C_SUB, false);
-                top.addView(t2);
-                row.addView(top);
-                TextView sub = text(last, 11, C_SUB, false);
-                sub.setPadding(0, dp(1), 0, 0);
-                sub.setMaxLines(1);
-                row.addView(sub);
+
+                // 圆圈头像：取名字第一个字
+                TextView av = text(title.substring(0, 1), 15, 0xFFFFFFFF, true);
+                av.setGravity(Gravity.CENTER);
+                GradientDrawable ag = new GradientDrawable();
+                ag.setShape(GradientDrawable.OVAL);
+                ag.setColor(avatarColor(key));
+                av.setBackground(ag);
+                LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(42), dp(42));
+                alp.setMargins(0, 0, dp(11), 0);
+                av.setLayoutParams(alp);
+                row.addView(av);
+
+                // 中间：名字 + 最后一句
+                LinearLayout mid = new LinearLayout(this);
+                mid.setOrientation(LinearLayout.VERTICAL);
+                mid.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                TextView t1 = text(title, 14, C_TXT, true);
+                t1.setMaxLines(1);
+                t1.setEllipsize(TextUtils.TruncateAt.END);
+                mid.addView(t1);
+                TextView t2 = text(last, 12, C_SUB, false);
+                t2.setMaxLines(1);
+                t2.setEllipsize(TextUtils.TruncateAt.END);
+                t2.setPadding(0, dp(3), 0, 0);
+                mid.addView(t2);
+                row.addView(mid);
+
+                // 右侧：时间 + 条数
+                LinearLayout right = new LinearLayout(this);
+                right.setOrientation(LinearLayout.VERTICAL);
+                right.setGravity(Gravity.END);
                 LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rlp.setMargins(0, 0, 0, dp(5));
-                row.setLayoutParams(rlp);
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                rlp.setMargins(dp(8), 0, 0, 0);
+                right.setLayoutParams(rlp);
+                TextView rt = text(hhmm(it.optString("ts")), 10, C_SUB, false);
+                rt.setGravity(Gravity.END);
+                right.addView(rt);
+                TextView rb = text(count + " 条", 10, C_SUB, false);
+                rb.setGravity(Gravity.END);
+                rb.setPadding(0, dp(4), 0, 0);
+                right.addView(rb);
+                row.addView(right);
+
                 convBox.addView(row);
+
+                View div = new View(this);
+                div.setBackgroundColor(C_LINE);
+                LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+                dlp.setMargins(dp(57), 0, 0, 0);
+                div.setLayoutParams(dlp);
+                if (i < arr.length() - 1) convBox.addView(div);
             } catch (Exception e) { }
         }
     }
@@ -1380,9 +1453,12 @@ public class MainActivity extends Activity {
                     if (chatBox.getChildCount() == 0) chatBox.addView(text(err, 13, C_BAD, false));
                     return;
                 }
+                boolean wasBottom = isAtBottom();
                 renderMessages(o.optJSONArray("messages"));
                 cachePut("msg_" + (chatTarget == null ? "" : chatTarget), o.toString());
-                scrollToBottom();
+                String t = o.optString("title");
+                if (t != null && t.length() > 0) { chatTitle = t; setChatTitle(t); }
+                if (wasBottom) scrollToBottom();   // 翻上去看历史时别被硬拽回底部
             }
         });
     }
@@ -1430,6 +1506,15 @@ public class MainActivity extends Activity {
         chatScroll.post(new Runnable() {
             public void run() { chatScroll.fullScroll(View.FOCUS_DOWN); }
         });
+    }
+
+    /** 是否已经贴在底部（决定刷新后要不要自动滚下去） */
+    boolean isAtBottom() {
+        if (chatScroll == null || chatBox == null) return true;
+        int vh = chatScroll.getHeight();
+        int ch = chatBox.getHeight();
+        if (vh <= 0 || ch <= 0) return true;
+        return (chatScroll.getScrollY() + vh) >= (ch - dp(28));
     }
 
     void loadLogs() {

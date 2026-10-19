@@ -6,6 +6,7 @@
 所有操作都在本机执行（systemctl / docker / journalctl），不需要 SSH。
 """
 import base64
+import datetime
 import urllib.request
 import hmac
 import io
@@ -487,7 +488,64 @@ def _event_from_ingest(obj):
     elif not ts:
         ts = time.strftime("%H:%M:%S")
     return {"dir": direction, "chat": chat_name, "who": who,
-            "text": text[:200], "kind": kind, "ts": ts}
+            "text": text[:200], "kind": kind, "ts": ts,
+            "dt": _dt_str(_dt_from_ts(ts))}
+
+
+# journalctl 输出 `Oct 19 21:13:29 host unit[pid]: ...`
+# 手动发送日志是 `2026-10-19 21:13:29 [发送] ...`
+_MON = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+_TS_FULL = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})")
+_TS_JOURNAL = re.compile(r"^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})")
+_TS_HMS = re.compile(r"(\d{2}):(\d{2}):(\d{2})")
+
+
+def _dt_from_line(line):
+    """一行日志的真实时间（datetime）；认不出返回 None"""
+    now = datetime.datetime.now()
+    m = _TS_FULL.match(line)
+    if m:
+        try:
+            return datetime.datetime(*[int(x) for x in m.groups()])
+        except ValueError:
+            return None
+    m = _TS_JOURNAL.match(line)
+    if m and _MON.get(m.group(1)):
+        try:
+            dt = datetime.datetime(now.year, _MON[m.group(1)], int(m.group(2)),
+                                   int(m.group(3)), int(m.group(4)), int(m.group(5)))
+            if dt - now > datetime.timedelta(days=2):        # 跨年
+                dt = dt.replace(year=now.year - 1)
+            return dt
+        except ValueError:
+            return None
+    m = _TS_HMS.search(line)
+    if m:
+        try:
+            return now.replace(hour=int(m.group(1)), minute=int(m.group(2)),
+                               second=int(m.group(3)), microsecond=0)
+        except ValueError:
+            return None
+    return None
+
+
+def _dt_from_ts(ts):
+    """只有 HH:MM:SS 时按今天补全"""
+    if not ts:
+        return None
+    m = _TS_HMS.search(ts)
+    if not m:
+        return None
+    try:
+        return datetime.datetime.now().replace(hour=int(m.group(1)), minute=int(m.group(2)),
+                                               second=int(m.group(3)), microsecond=0)
+    except ValueError:
+        return None
+
+
+def _dt_str(dt):
+    return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else ""
 
 
 def _compile_patterns():
@@ -528,7 +586,8 @@ def _event_from_line(ln, pats):
             kind = "media"
             text = "[表情]" if "表情" in text else "[图片]"
         return {"dir": direction, "chat": chat_name, "who": who,
-                "text": text[:200], "kind": kind, "ts": ts}
+                "text": text[:200], "kind": kind, "ts": ts,
+                "dt": _dt_str(_dt_from_line(ln))}
     return None
 
 
@@ -574,8 +633,12 @@ def _parse_all(force=False):
         if ev:
             msgs.append(ev)
 
-    # 按时间戳排序（只有 HH:MM:SS，够用；同一秒保持原顺序）
-    msgs.sort(key=lambda m: m.get("ts") or "")
+    # 三处来源合并后按「真实时间」稳定排序。
+    # 只按 HH:MM:SS 排会在跨零点时把昨天的消息排到今天后面（自己发的消息就跑到最下面了）
+    indexed = [(0, ev.get("dt") or "", i, ev) if ev.get("dt") else (1, "", i, ev)
+               for i, ev in enumerate(msgs)]
+    indexed.sort(key=lambda t: (t[0], t[1], t[2]))
+    msgs = [t[3] for t in indexed]
     _MSG_CACHE["msgs"] = msgs
     _MSG_CACHE["ts"] = now
     return msgs
@@ -595,21 +658,43 @@ def conversations(limit=300):
     for m in msgs:
         key = m["chat"] or "未知"
         if key not in seen:
-            seen[key] = {"chat": key, "count": 0, "last": "", "ts": "", "dir": ""}
+            seen[key] = {"chat": key, "title": "", "count": 0, "last": "",
+                         "ts": "", "dt": "", "dir": ""}
             order.append(key)
         c = seen[key]
         c["count"] += 1
         c["last"] = m["text"]
         c["ts"] = m["ts"]
         c["dir"] = m["dir"]
+        c["dt"] = m.get("dt", "")
     out = [seen[k] for k in order]
-    out.sort(key=lambda x: x["ts"], reverse=True)
+    for c in out:
+        c["title"] = chat_title(c["chat"])
+    out.sort(key=lambda x: x["dt"] or "", reverse=True)
     return out
 
 
 
 OB_HTTP = CFG["onebot"]["http"].rstrip("/")
 OB_TOKEN = CFG["onebot"]["token"]
+
+# 会话显示名：默认就是 chat 本身（「群 123456」）；
+# 想显示真名就写 data/console_names.json，例如 {"群 123456": "相亲相爱一家人"}
+NAMES_FILE = os.path.join(BOT_DIR, "data", "console_names.json")
+_NAMES_CACHE = {"ts": 0.0, "map": {}}
+
+
+def chat_title(chat):
+    now = time.time()
+    if now - _NAMES_CACHE["ts"] > 60:
+        _NAMES_CACHE["ts"] = now
+        try:
+            with open(NAMES_FILE, "r", encoding="utf-8") as f:
+                m = json.load(f)
+            _NAMES_CACHE["map"] = m if isinstance(m, dict) else {}
+        except (OSError, ValueError):
+            pass
+    return str(_NAMES_CACHE["map"].get(chat) or chat)
 
 
 def ob_call(action, payload, timeout=25):
@@ -1136,7 +1221,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/messages":
             limit = int(q.get("limit", ["120"])[0])
             chat = (q.get("chat", [""])[0] or "").strip() or None
-            return self._send(200, {"messages": chat_messages(limit, chat)})
+            body = {"messages": chat_messages(limit, chat)}
+            if chat:
+                body["chat"] = chat
+                body["title"] = chat_title(chat)
+            return self._send(200, body)
         if path == "/api/conversations":
             return self._send(200, {"items": conversations(int(q.get("limit", ["200"])[0]))})
         if path == "/api/logs":
