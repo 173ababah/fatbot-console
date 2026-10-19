@@ -484,6 +484,10 @@ namespace FishBotConsole
         public bool Dark = true;
         public float Scale = 1.0f;
         public string WebuiToken = "3bad0b04624d";   // SnowLuma WebUI 端口（5099）不需要 token
+        // 托盘
+        public bool Tray = true;        // 最小化时收进托盘
+        public bool TrayClose = true;   // 点关闭收进托盘（不退出）
+        public bool TrayStart = false;  // 启动就藏进托盘
 
         static string Dir
         {
@@ -533,6 +537,9 @@ namespace FishBotConsole
                     else if (k == "dark") c.Dark = v == "1";
                     else if (k == "scale") { float f; if (float.TryParse(v, out f)) c.Scale = Math.Max(0.8f, Math.Min(1.5f, f)); }
                     else if (k == "webuitoken") c.WebuiToken = v;
+                    else if (k == "tray") c.Tray = v != "0";
+                    else if (k == "trayclose") c.TrayClose = v != "0";
+                    else if (k == "traystart") c.TrayStart = v != "0";
                 }
             }
             catch { }
@@ -556,6 +563,9 @@ namespace FishBotConsole
                 sb.AppendLine("dark=" + (Dark ? "1" : "0"));
                 sb.AppendLine("scale=" + Scale.ToString("0.00"));
                 sb.AppendLine("webuitoken=" + WebuiToken);
+                sb.AppendLine("tray=" + (Tray ? "1" : "0"));
+                sb.AppendLine("trayclose=" + (TrayClose ? "1" : "0"));
+                sb.AppendLine("traystart=" + (TrayStart ? "1" : "0"));
                 File.WriteAllText(FilePath, sb.ToString(), new UTF8Encoding(false));
             }
             catch { }
@@ -602,6 +612,9 @@ namespace FishBotConsole
 
         Control _activeNav;
         bool _busy;
+        NotifyIcon _tray;
+        bool _exiting;          // true = 真的要退出（托盘「退出」或关机）
+        bool _trayHinted;       // 第一次收进托盘时给个气泡提示
 
         public MainForm()
         {
@@ -635,7 +648,23 @@ namespace FishBotConsole
             var resizeTimer = new System.Windows.Forms.Timer();
             resizeTimer.Interval = 260;
             resizeTimer.Tick += (s2, e2) => { resizeTimer.Stop(); FastRebuild(); };
-            Resize += (s2, e2) => { resizeTimer.Stop(); resizeTimer.Start(); };
+            Resize += (s2, e2) =>
+            {
+                if (_cfg.Tray && WindowState == FormWindowState.Minimized) { HideToTray(false); return; }
+                resizeTimer.Stop(); resizeTimer.Start();
+            };
+
+            // 关闭窗口 = 收进托盘（托盘菜单的「退出」才是真退出）
+            FormClosing += (s2, e2) =>
+            {
+                if (!_exiting && _cfg.Tray && _cfg.TrayClose)
+                {
+                    e2.Cancel = true;
+                    HideToTray(false);
+                }
+            };
+
+            SetupTray();
 
             Load += (s, e) =>
             {
@@ -651,6 +680,7 @@ namespace FishBotConsole
                 }));
                 DarkUi.Preferred(_cfg.Dark);
                 DarkUi.Apply(this, _cfg.Dark);
+                if (_cfg.Tray && _cfg.TrayStart) BeginInvoke(new Action(() => HideToTray(true)));
                 Log("控制台已启动 · 服务器 " + _cfg.Host + " · " + (_cfg.Dark ? "夜间模式" : "白天模式") + " · 缩放 " + S.ToString("0.00") + "x");
                 RefreshStatus();
             };
@@ -864,6 +894,109 @@ namespace FishBotConsole
             if (id == "paths") return PagePaths();
             if (id == "docs") return PageDocs();
             return null;
+        }
+
+        // ============================================================ 托盘
+        void SetupTray()
+        {
+            try
+            {
+                if (_tray != null) return;
+                _tray = new NotifyIcon();
+                try { _tray.Icon = Icon ?? Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+                catch { _tray.Icon = SystemIcons.Application; }
+                _tray.Text = "肥鱼控制台 · " + _cfg.Host;
+                _tray.Visible = true;
+
+                var menu = new ContextMenuStrip();
+                menu.Font = new Font("Microsoft YaHei UI", 9F);
+                var miShow = new ToolStripMenuItem("显示控制台");
+                miShow.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+                miShow.Click += (s2, e2) => ShowFromTray();
+                var miStatus = new ToolStripMenuItem("刷新状态");
+                miStatus.Click += (s2, e2) => { ShowFromTray(); RefreshStatus(); };
+                var miChat = new ToolStripMenuItem("打开聊天记录");
+                miChat.Click += (s2, e2) => { ShowFromTray(); BeginInvoke(new Action(() => ShowChatWindow())); };
+                var miExit = new ToolStripMenuItem("退出控制台");
+                miExit.Click += (s2, e2) =>
+                {
+                    _exiting = true;
+                    if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
+                    Close();
+                };
+                menu.Items.Add(miShow);
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add(miStatus);
+                menu.Items.Add(miChat);
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add(miExit);
+                _tray.ContextMenuStrip = menu;
+                _tray.DoubleClick += (s2, e2) => ShowFromTray();
+                _tray.MouseClick += (s2, e2) =>
+                {
+                    if (e2.Button == MouseButtons.Left) ShowFromTray();
+                };
+            }
+            catch (Exception ex)
+            {
+                Log("托盘图标创建失败：" + ex.Message);
+            }
+        }
+
+        void HideToTray(bool silent)
+        {
+            try
+            {
+                Hide();
+                ShowInTaskbar = false;
+                if (_tray != null)
+                {
+                    _tray.Visible = true;
+                    _tray.Text = "肥鱼控制台 · " + _cfg.Host;
+                    if (!silent && !_trayHinted)
+                    {
+                        _trayHinted = true;
+                        try
+                        {
+                            _tray.ShowBalloonTip(2500, "肥鱼控制台还在后台",
+                                "点托盘图标可以重新打开；要真退出请右键托盘图标 →「退出控制台」。",
+                                ToolTipIcon.Info);
+                        }
+                        catch { }
+                    }
+                }
+                Log("已收进托盘（" + DateTime.Now.ToString("HH:mm:ss") + "）");
+            }
+            catch (Exception ex)
+            {
+                Log("收进托盘失败：" + ex.Message);
+            }
+        }
+
+        public void ShowFromTray()
+        {
+            try
+            {
+                ShowInTaskbar = true;
+                if (!Visible) Show();
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                Activate();
+                BringToFront();
+                TopMost = true;
+                TopMost = false;
+            }
+            catch { }
+        }
+
+        // 重建所有缓存的页面（开关状态变了就靠它刷新按钮文字）
+        void RefreshPages()
+        {
+            try
+            {
+                _pages.Clear();
+                ShowPage(_page);
+            }
+            catch { }
         }
 
         // 丢掉缓存（换主题 / 换字号时才需要重建）
@@ -1732,6 +1865,41 @@ namespace FishBotConsole
             };
             lSave.Controls.Add(save);
             AddRow(page, conn, false);
+
+            var trayCard = FlexCard("托盘 / 后台");
+            var rowTray = Line(Body(trayCard));
+            rowTray.WrapContents = true;
+            Func<string, bool, RBtn> trayBtn = (label, on) =>
+            {
+                var b = FBtn(label + (on ? "：开" : "：关"), on, false);
+                b.Margin = new Padding(0, 0, Sc(8), 0);
+                return b;
+            };
+            var bTray = trayBtn("最小化到托盘", _cfg.Tray);
+            bTray.Click += (s2, e2) => { _cfg.Tray = !_cfg.Tray; _cfg.Save(); RefreshPages(); };
+            var bTrayClose = trayBtn("点关闭收进托盘", _cfg.TrayClose);
+            bTrayClose.Click += (s2, e2) => { _cfg.TrayClose = !_cfg.TrayClose; _cfg.Save(); RefreshPages(); };
+            var bTrayStart = trayBtn("启动时隐藏", _cfg.TrayStart);
+            bTrayStart.Click += (s2, e2) => { _cfg.TrayStart = !_cfg.TrayStart; _cfg.Save(); RefreshPages(); };
+            rowTray.Controls.Add(bTray);
+            rowTray.Controls.Add(bTrayClose);
+            rowTray.Controls.Add(bTrayStart);
+            var rowTray2 = Line(Body(trayCard));
+            var bHideNow = FBtn("现在就收进托盘", false, false);
+            bHideNow.Click += (s2, e2) => HideToTray(false);
+            rowTray2.Controls.Add(bHideNow);
+            var bExit = FBtn("彻底退出", false, true);
+            bExit.Click += (s2, e2) =>
+            {
+                if (MessageBox.Show(this, "要从托盘退出控制台吗？（不影响服务器上的机器人）", "确认",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                _exiting = true;
+                if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
+                Close();
+            };
+            rowTray2.Controls.Add(bExit);
+            Body(trayCard).Controls.Add(Txt("收进托盘后控制台还在后台跑，状态检查、聊天记录都不会停。", 9f, false, _th.Sub));
+            AddRow(page, trayCard, false);
 
             var look = FlexCard("外观");
             var lTheme = Line(Body(look));
