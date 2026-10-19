@@ -16,10 +16,14 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -43,7 +47,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
 
     // ==== 服务器配置（改这里即可换服务器）====
-    static final String BASE = "http://127.0.0.1:8090";
+    static final String BASE = "http://your-server.example.com:8090";
     static final String TOKEN = "CHANGE_ME_CONSOLE_TOKEN";
 
     // ==== 配色 ====
@@ -62,8 +66,22 @@ public class MainActivity extends Activity {
     final Handler ui = new Handler(Looper.getMainLooper());
     SharedPreferences prefs;
 
-    LinearLayout root, pageHome, pageSelf, pageQr, pageLogs;
-    final TextView[] tabViews = new TextView[4];
+    LinearLayout root, pageHome, pageCtl, pageSelf, pageQr, pageLogs;
+    final TextView[] tabViews = new TextView[5];
+
+    // 机器人控件（每群）
+    Spinner ctlSpinner;
+    Button ctlAtBtn;
+    SeekBar ctlSpeedBar, ctlRateBar;
+    TextView ctlSpeedVal, ctlRateVal, ctlLenVal, ctlStatus, ctlGroupTip;
+    Button ctlLen14, ctlLen26, ctlLen40, ctlRateClear;
+    String ctlChat = null;
+    boolean ctlOnlyAt = false;
+    int ctlLen = 26;
+    double ctlSpeed = 1.0;
+    double ctlRate = -1.0;
+    final List<String> ctlGids = new ArrayList<String>();
+    final List<String> ctlNames = new ArrayList<String>();
     int curTab = 0;
 
     TextView vVerdict, vHint, vSvc, vNap, vMem, vUp, vFlow, vStamp, vDog;
@@ -132,13 +150,13 @@ public class MainActivity extends Activity {
         root.setPadding(pad, dp(18) + statusBarHeight(), pad, dp(24));
 
         root.addView(text("肥鱼控制台", 26, C_TXT, true));
-        TextView sub = text("原生安卓版 · 协议端 SnowLuma", 13, C_SUB, false);
+        TextView sub = text("原生安卓版 · 协议端（SnowLuma / NapCat 等）", 13, C_SUB, false);
         sub.setPadding(0, dp(2), 0, dp(14));
         root.addView(sub);
 
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
-        String[] names = {"状态", "自检", "扫码", "日志"};
+        String[] names = {"状态", "控件", "自检", "扫码", "日志"};
         for (int i = 0; i < names.length; i++) {
             final int idx = i;
             TextView t = new TextView(this);
@@ -159,10 +177,12 @@ public class MainActivity extends Activity {
         root.addView(tabs);
 
         pageHome = buildHome();
+        pageCtl = buildCtl();
         pageSelf = buildSelf();
         pageQr = buildQr();
         pageLogs = buildLogs();
         root.addView(pageHome);
+        root.addView(pageCtl);
         root.addView(pageSelf);
         root.addView(pageQr);
         root.addView(pageLogs);
@@ -308,6 +328,340 @@ public class MainActivity extends Activity {
                 btn("重启协议端", 0, 0, "napcat-restart")));
         page.addView(card);
         return page;
+    }
+
+    // ================================================== 机器人控件页
+    LinearLayout buildCtl() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+
+        // 选群
+        LinearLayout c1 = card();
+        c1.addView(text("选一个群", 16, C_TXT, true));
+        ctlSpinner = new Spinner(this);
+        ctlSpinner.setBackground(roundBg(C_BTN, C_LINE, 12));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        sp.setMargins(0, dp(10), 0, dp(6));
+        ctlSpinner.setLayoutParams(sp);
+        ctlSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> a, View v, int pos, long id) {
+                if (pos >= 0 && pos < ctlGids.size()) {
+                    ctlChat = "群 " + ctlGids.get(pos);
+                    ctlLoadRules(ctlChat);
+                }
+            }
+            public void onNothingSelected(AdapterView<?> a) { }
+        });
+        c1.addView(ctlSpinner);
+        ctlGroupTip = text("下拉选群；也可以直接在下面输入群号", 12, C_SUB, false);
+        c1.addView(ctlGroupTip);
+        final EditText gidInput = new EditText(this);
+        gidInput.setHint("群号，例如 123456789");
+        gidInput.setTextSize(14);
+        gidInput.setTextColor(C_TXT);
+        gidInput.setHintTextColor(C_SUB);
+        gidInput.setBackground(roundBg(C_BTN, C_LINE, 12));
+        gidInput.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams gi = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gi.setMargins(0, dp(8), 0, 0);
+        gidInput.setLayoutParams(gi);
+        c1.addView(gidInput);
+        c1.addView(buttonRow(
+                btn("刷新群列表", C_ACCENT, 0xFFFFFFFF, "ctl-groups"),
+                btn("载入这个群号", 0, 0, "ctl-loadgid")));
+        page.addView(c1);
+
+        // 三个控件
+        LinearLayout c2 = card();
+        c2.addView(text("她在这个群怎么说话", 16, C_TXT, true));
+
+        // 仅@后回复
+        LinearLayout rAt = new LinearLayout(this);
+        rAt.setOrientation(LinearLayout.HORIZONTAL);
+        rAt.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rl.setMargins(0, dp(12), 0, 0);
+        rAt.setLayoutParams(rl);
+        TextView lAt = text("仅接受 @ 后回复", 15, C_TXT, false);
+        lAt.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        rAt.addView(lAt);
+        ctlAtBtn = btn("关闭", 0, 0, "ctl-at");
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(dp(96), dp(44));
+        ctlAtBtn.setLayoutParams(bl);
+        rAt.addView(ctlAtBtn);
+        c2.addView(rAt);
+
+        // 回复速度
+        TextView lSp = text("回复速度", 15, C_TXT, false);
+        lSp.setPadding(0, dp(14), 0, 0);
+        c2.addView(lSp);
+        ctlSpeedBar = new SeekBar(this);
+        ctlSpeedBar.setMax(270);      // 30..300 → 0.30x..3.00x
+        ctlSpeedBar.setProgress(70);
+        ctlSpeedBar.setPadding(0, dp(6), 0, dp(6));
+        c2.addView(ctlSpeedBar);
+        ctlSpeedVal = text("1.00x", 13, C_ACCENT, true);
+        c2.addView(ctlSpeedVal);
+
+        // 聊天频率
+        TextView lRt = text("聊天频率", 15, C_TXT, false);
+        lRt.setPadding(0, dp(14), 0, 0);
+        c2.addView(lRt);
+        ctlRateBar = new SeekBar(this);
+        ctlRateBar.setMax(100);
+        ctlRateBar.setProgress(100);
+        ctlRateBar.setPadding(0, dp(6), 0, dp(6));
+        c2.addView(ctlRateBar);
+        LinearLayout rRt = new LinearLayout(this);
+        rRt.setOrientation(LinearLayout.HORIZONTAL);
+        rRt.setGravity(Gravity.CENTER_VERTICAL);
+        ctlRateVal = text("（全局）", 13, C_ACCENT, true);
+        ctlRateVal.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        rRt.addView(ctlRateVal);
+        ctlRateClear = btn("跟随全局", 0, 0, "ctl-rateclear");
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(dp(100), dp(40));
+        ctlRateClear.setLayoutParams(cl);
+        rRt.addView(ctlRateClear);
+        c2.addView(rRt);
+        c2.addView(text("没人叫她时主动接话的概率：0% 几乎不插话，100% 每条都想插一句。", 12, C_SUB, false));
+
+        // 句式长度
+        TextView lLen = text("句式长度", 15, C_TXT, false);
+        lLen.setPadding(0, dp(14), 0, dp(6));
+        c2.addView(lLen);
+        LinearLayout rLen = new LinearLayout(this);
+        rLen.setOrientation(LinearLayout.HORIZONTAL);
+        ctlLen14 = btn("14", 0, 0, "ctl-len14");
+        ctlLen26 = btn("26", 0, 0, "ctl-len26");
+        ctlLen40 = btn("40", 0, 0, "ctl-len40");
+        Button[] lens = {ctlLen14, ctlLen26, ctlLen40};
+        for (int i = 0; i < lens.length; i++) {
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(46), 1f);
+            p.setMargins(dp(3), 0, dp(3), 0);
+            lens[i].setLayoutParams(p);
+            rLen.addView(lens[i]);
+        }
+        c2.addView(rLen);
+        ctlLenVal = text("当前：26 字", 12, C_SUB, false);
+        ctlLenVal.setPadding(0, dp(8), 0, 0);
+        c2.addView(ctlLenVal);
+        page.addView(c2);
+
+        // 保存
+        LinearLayout c3 = card();
+        c3.addView(buttonRow(
+                btn("保存到这个群", C_ACCENT, 0xFFFFFFFF, "ctl-save"),
+                btn("重新读取", 0, 0, "ctl-reload")));
+        ctlStatus = text("选个群先载入，再改。", 12, C_SUB, false);
+        ctlStatus.setPadding(0, dp(8), 0, 0);
+        c3.addView(ctlStatus);
+        page.addView(c3);
+
+        // 事件
+        ctlAtBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { ctlOnlyAt = !ctlOnlyAt; ctlPaint(); }
+        });
+        ctlSpeedBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                ctlSpeed = (p + 30) / 100.0;
+                ctlPaint();
+            }
+            public void onStartTrackingTouch(SeekBar s) { }
+            public void onStopTrackingTouch(SeekBar s) { }
+        });
+        ctlRateBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                ctlRate = p / 100.0;
+                ctlRateVal.setText(p + "%");
+            }
+            public void onStartTrackingTouch(SeekBar s) { }
+            public void onStopTrackingTouch(SeekBar s) { }
+        });
+        ctlRateClear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { ctlRate = -1.0; ctlPaint(); }
+        });
+        ctlLen14.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { ctlLen = 14; ctlPaint(); }
+        });
+        ctlLen26.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { ctlLen = 26; ctlPaint(); }
+        });
+        ctlLen40.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { ctlLen = 40; ctlPaint(); }
+        });
+        // 输入群号后「载入」
+        Button loadGid = findBtn(c1, "载入这个群号");
+        if (loadGid != null) {
+            loadGid.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    String g = "";
+                    for (char ch : gidInput.getText().toString().toCharArray())
+                        if (Character.isDigit(ch)) g += ch;
+                    if (g.length() < 5) { toast("群号看着不对"); return; }
+                    ctlChat = "群 " + g;
+                    ctlStatus.setText("读取 群 " + g + " …");
+                    ctlLoadRules(ctlChat);
+                }
+            });
+        }
+        return page;
+    }
+
+    Button findBtn(View rootV, String label) {
+        if (!(rootV instanceof ViewGroup)) return null;
+        ViewGroup g = (ViewGroup) rootV;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View c = g.getChildAt(i);
+            if (c instanceof Button && label.contentEquals(((Button) c).getText())) return (Button) c;
+            Button r = findBtn(c, label);
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    void ctlPaint() {
+        if (ctlAtBtn != null) {
+            ctlAtBtn.setText(ctlOnlyAt ? "已开启" : "关闭");
+            ctlAtBtn.setBackground(roundBg(ctlOnlyAt ? C_ACCENT : C_BTN, C_LINE, 14));
+            ctlAtBtn.setTextColor(ctlOnlyAt ? 0xFFFFFFFF : C_TXT);
+        }
+        if (ctlSpeedVal != null) {
+            int p = (int) Math.round(ctlSpeed * 100) - 30;
+            if (p < 0) p = 0;
+            if (ctlSpeedBar.getProgress() != p) ctlSpeedBar.setProgress(p);
+            ctlSpeedVal.setText(String.format("%.2fx", ctlSpeed));
+        }
+        if (ctlRateVal != null) {
+            if (ctlRate < 0) {
+                ctlRateVal.setText("（跟全局）");
+                ctlRateBar.setEnabled(false);
+            } else {
+                ctlRateBar.setEnabled(true);
+                int p = (int) Math.round(ctlRate * 100);
+                if (ctlRateBar.getProgress() != p) ctlRateBar.setProgress(p);
+                ctlRateVal.setText(p + "%");
+            }
+        }
+        if (ctlLenVal != null) ctlLenVal.setText("当前：" + ctlLen + " 字");
+        Button[] lens = {ctlLen14, ctlLen26, ctlLen40};
+        int[] vals = {14, 26, 40};
+        for (int i = 0; i < lens.length; i++) {
+            if (lens[i] == null) continue;
+            boolean on = (ctlLen == vals[i]);
+            lens[i].setBackground(roundBg(on ? C_ACCENT_D : C_BTN, on ? 0 : C_LINE, 14));
+            lens[i].setTextColor(on ? 0xFFDFE7FF : C_TXT);
+        }
+    }
+
+    void ctlLoadGroups() {
+        ctlStatus.setText("拉群列表…");
+        getJson("/api/groups", new JsonCb() {
+            public void on(JSONObject o, String err) {
+                if (err != null) { ctlStatus.setText("群列表失败：" + err); return; }
+                ctlGids.clear();
+                ctlNames.clear();
+                JSONArray arr = o.optJSONArray("items");
+                for (int i = 0; arr != null && i < arr.length(); i++) {
+                    JSONObject g = arr.optJSONObject(i);
+                    if (g == null) continue;
+                    String gid = g.optString("gid");
+                    String nm = g.optString("name");
+                    ctlGids.add(gid);
+                    ctlNames.add("群 " + gid + (nm.isEmpty() ? "" : " · " + nm));
+                }
+                ArrayAdapter<String> ad = new ArrayAdapter<String>(MainActivity.this,
+                        android.R.layout.simple_spinner_item, ctlNames);
+                ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                ctlSpinner.setAdapter(ad);
+                if (ctlGids.isEmpty()) { ctlStatus.setText("没拿到群列表"); return; }
+                ctlChat = "群 " + ctlGids.get(0);
+                ctlLoadRules(ctlChat);
+            }
+        });
+    }
+
+    void ctlLoadRules(String chat) {
+        ctlStatus.setText("读取 " + chat + " …");
+        try {
+            getJson("/api/botctl?chat=" + URLEncoder.encode(chat, "UTF-8"), new JsonCb() {
+                public void on(JSONObject o, String err) {
+                    if (err != null) { ctlStatus.setText("读取失败：" + err); return; }
+                    JSONObject r = o.optJSONObject("rules");
+                    if (r != null) {
+                        ctlOnlyAt = r.optBoolean("only_at", false);
+                        ctlLen = r.optInt("max_len", 0);
+                        if (ctlLen <= 0) ctlLen = 26;
+                        ctlSpeed = r.optDouble("speed", 1.0);
+                        if (ctlSpeed <= 0) ctlSpeed = 1.0;
+                        ctlRate = r.optDouble("chat_rate", -1.0);
+                    }
+                    ctlPaint();
+                    ctlStatus.setText("已载入 " + ctlChat);
+                }
+            });
+        } catch (Exception e) {
+            ctlStatus.setText("群名编码失败");
+        }
+    }
+
+    void ctlSave() {
+        if (ctlChat == null) { toast("先选一个群"); return; }
+        ctlStatus.setText("保存中…");
+        JSONObject body = new JSONObject();
+        try {
+            body.put("chat", ctlChat);
+            body.put("only_at", ctlOnlyAt);
+            body.put("max_len", ctlLen);
+            body.put("speed", Math.round(ctlSpeed * 100) / 100.0);
+            body.put("chat_rate", Math.round(ctlRate * 100) / 100.0);
+        } catch (Exception e) { }
+        postJsonBody("/api/botctl", body, new JsonCb() {
+            public void on(JSONObject o, String err) {
+                if (err != null) { ctlStatus.setText("保存失败：" + err); return; }
+                boolean ok = o != null && o.optBoolean("ok");
+                ctlStatus.setText(ok
+                        ? "已保存：" + ctlChat + " → 仅@" + (ctlOnlyAt ? "开" : "关")
+                          + "，长度 " + ctlLen + "，速度 " + String.format("%.2fx", ctlSpeed)
+                          + "，频率 " + (ctlRate < 0 ? "跟全局" : ((int) Math.round(ctlRate * 100)) + "%")
+                        : ("保存失败：" + (o == null ? "?" : o.optString("msg"))));
+                toast(ok ? "已保存" : "保存失败");
+            }
+        });
+    }
+
+    void postJsonBody(final String path, final JSONObject body, final JsonCb cb) {
+        pool.execute(new Runnable() {
+            public void run() {
+                String err = null;
+                JSONObject obj = null;
+                HttpURLConnection c = null;
+                try {
+                    c = (HttpURLConnection) new URL(api(path)).openConnection();
+                    c.setDoOutput(true);
+                    c.setRequestMethod("POST");
+                    c.setRequestProperty("Content-Type", "application/json");
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(60000);
+                    c.getOutputStream().write(body.toString().getBytes("UTF-8"));
+                    int code = c.getResponseCode();
+                    InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                    String txt = read(is);
+                    if (code == 401) err = "token 无效";
+                    else if (code >= 400) err = "服务器返回 " + code;
+                    else obj = new JSONObject(txt);
+                } catch (Exception e) {
+                    err = "连不上服务器";
+                } finally {
+                    if (c != null) c.disconnect();
+                }
+                final JSONObject fo = obj;
+                final String fe = err;
+                ui.post(new Runnable() { public void run() { cb.on(fo, fe); } });
+            }
+        });
     }
 
     LinearLayout buildLogs() {
@@ -570,14 +924,15 @@ public class MainActivity extends Activity {
     // ================================================== 标签切换
     void switchTab(int idx) {
         curTab = idx;
-        LinearLayout[] pages = {pageHome, pageSelf, pageQr, pageLogs};
+        LinearLayout[] pages = {pageHome, pageCtl, pageSelf, pageQr, pageLogs};
         for (int i = 0; i < pages.length; i++) {
             pages[i].setVisibility(i == idx ? View.VISIBLE : View.GONE);
             paintTab(tabViews[i], i == idx);
         }
-        if (idx == 1) runSelfCheck();
-        if (idx == 2) { loadQr(); startQrTimer(); } else stopQrTimer();
-        if (idx == 3) {
+        if (idx == 1) { if (ctlGids.isEmpty()) ctlLoadGroups(); }
+        if (idx == 2) runSelfCheck();
+        if (idx == 3) { loadQr(); startQrTimer(); } else stopQrTimer();
+        if (idx == 4) {
             if (logMsg) { showConvList(); loadConversations(); }
             else { if (convCard != null) convCard.setVisibility(View.GONE);
                    if (chatCardView != null) chatCardView.setVisibility(View.GONE);
@@ -1106,6 +1461,14 @@ public class MainActivity extends Activity {
             return;
         }
         if ("refresh".equals(action)) { loadStatus(); toast("已刷新"); return; }
+        if ("ctl-groups".equals(action)) { ctlLoadGroups(); return; }
+        if ("ctl-reload".equals(action)) { if (ctlChat != null) ctlLoadRules(ctlChat); return; }
+        if ("ctl-save".equals(action)) { ctlSave(); return; }
+        if ("ctl-at".equals(action)) { ctlOnlyAt = !ctlOnlyAt; ctlPaint(); return; }
+        if ("ctl-len14".equals(action)) { ctlLen = 14; ctlPaint(); return; }
+        if ("ctl-len26".equals(action)) { ctlLen = 26; ctlPaint(); return; }
+        if ("ctl-len40".equals(action)) { ctlLen = 40; ctlPaint(); return; }
+        if ("ctl-rateclear".equals(action)) { ctlRate = -1.0; ctlPaint(); return; }
         if ("fix".equals(action)) { doFix(); return; }
         if ("stop".equals(action)) {
             confirm("关闭机器人？（会先发一句告别）", "stop");

@@ -21,7 +21,7 @@
 | `/api/info` | GET | 当前接入信息（服务/容器/OneBot/日志来源/消息条数，不含密钥） |
 | `/api/groups` | GET | 群列表（带每群当前规则），给「机器人控件」页用 |
 | `/api/botctl` | GET | 读某个群的规则：`?chat=群 123` |
-| `/api/botctl` | POST | 写某个群的规则：`{"chat","only_at","max_len","speed"}` |
+| `/api/botctl` | POST | 写某个群的规则：`{"chat","only_at","max_len","speed","chat_rate"}` |
 
 ## 会话与消息的数据结构
 
