@@ -19,6 +19,9 @@
 | `/api/send` | POST | 主动发送：`{"chat","text","voice"}` |
 | `/api/ingest` | POST | **外部机器人上报事件**（任何框架都能接） |
 | `/api/info` | GET | 当前接入信息（服务/容器/OneBot/日志来源/消息条数，不含密钥） |
+| `/api/groups` | GET | 群列表（带每群当前规则），给「机器人控件」页用 |
+| `/api/botctl` | GET | 读某个群的规则：`?chat=群 123` |
+| `/api/botctl` | POST | 写某个群的规则：`{"chat","only_at","max_len","speed"}` |
 
 ## 会话与消息的数据结构
 
@@ -121,6 +124,33 @@ curl "http://127.0.0.1:8090/api/info?token=<TOKEN>"
 ```
 
 `counts` 是你排查「为什么没消息」的第一站：为 0 就说明日志没匹配上或 ingest 没进来。
+
+## 机器人控件（/api/botctl）
+
+每个群可以单独调三件事，写进 `group_rules.json`：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `only_at` | bool | 只在她被 @ 时回复 |
+| `max_len` | int | 回复最大字数（超出截断），常用 14 / 26 / 40 |
+| `speed` | float | 回复速度倍率：1.0 默认，<1 更快，>1 更慢（0.3~3.0） |
+
+```bash
+# 读
+curl "http://127.0.0.1:8090/api/botctl?token=<TOKEN>&chat=%E7%BE%A4%20123456789"
+
+# 写（只改传了的字段）
+curl -X POST "http://127.0.0.1:8090/api/botctl?token=<TOKEN>" \
+  -H 'Content-Type: application/json' \
+  -d '{"chat":"群 123456789","only_at":true,"max_len":26,"speed":1.2}'
+```
+
+```json
+{"ok": true, "chat": "群 123456789", "gid": "123456789",
+ "rules": {"only_at": true, "max_len": 26, "speed": 1.2}}
+```
+
+只有**群**有这些规则（私聊读不到、写不了）。
 
 ## 消息是怎么被解析出来的
 

@@ -474,9 +474,6 @@ namespace FishBotConsole
     public class Cfg
     {
         public string Host = "your-server.example.com";
-        // 你的机器人：systemd 服务名 / 协议端容器名（留空表示没有容器）
-        public string Svc = "fishbot";
-        public string Ctr = "snowluma";
         public string User = "ubuntu";
         public string Pass = "Hdw173049dshbot";
         public string HostKey = "SHA256:TC+3bhPZy5VouQ7KsCHwXdV7uRgVkM9ej4e8bqKaHPA";
@@ -536,8 +533,6 @@ namespace FishBotConsole
                     else if (k == "dark") c.Dark = v == "1";
                     else if (k == "scale") { float f; if (float.TryParse(v, out f)) c.Scale = Math.Max(0.8f, Math.Min(1.5f, f)); }
                     else if (k == "webuitoken") c.WebuiToken = v;
-            else if (k == "svc") c.Svc = v;
-            else if (k == "ctr") c.Ctr = v;
                 }
             }
             catch { }
@@ -561,8 +556,6 @@ namespace FishBotConsole
                 sb.AppendLine("dark=" + (Dark ? "1" : "0"));
                 sb.AppendLine("scale=" + Scale.ToString("0.00"));
                 sb.AppendLine("webuitoken=" + WebuiToken);
-            sb.AppendLine("svc=" + (Svc ?? ""));
-            sb.AppendLine("ctr=" + (Ctr ?? ""));
                 File.WriteAllText(FilePath, sb.ToString(), new UTF8Encoding(false));
             }
             catch { }
@@ -707,6 +700,7 @@ namespace FishBotConsole
             string[][] nav = new string[][]
             {
                 new string[] { "cloud", "控制云端" },
+                new string[] { "botctl", "机器人控件" },
                 new string[] { "local", "控制本地" },
                 new string[] { "settings", "设置" },
                 new string[] { "about", "个人信息" },
@@ -862,6 +856,7 @@ namespace FishBotConsole
         Panel BuildPage(string id)
         {
             if (id == "cloud") return PageCloud();
+            if (id == "botctl") return PageBotCtl();
             if (id == "local") return PageLocal();
             if (id == "settings") return PageSettings();
             if (id == "about") return PageAbout();
@@ -1645,7 +1640,7 @@ namespace FishBotConsole
             {
                 try
                 {
-                    string o = Remote("journalctl -u {svc} --since '30 min ago' --no-pager 2>/dev/null "
+                    string o = Remote("journalctl -u fishbot --since '30 min ago' --no-pager 2>/dev/null "
                         + "| grep -F -e '[接收]' -e '[发送]' | tail -120", 25);
                     var lines = (o ?? "").Replace("\r", "").Split(new char[] { '\n' });
                     var fresh = new List<string>();
@@ -1726,10 +1721,6 @@ namespace FishBotConsole
             var tPass = InputFlex("密码", _cfg.Pass, Body(conn), true);
             var tFp = InputFlex("指纹", _cfg.HostKey, Body(conn), false);
             var tWebui = InputFlex("WebUI Token", _cfg.WebuiToken, Body(conn), false);
-            var tSvc = InputFlex("服务名（systemd）", _cfg.Svc, Body(conn), false);
-            tSvc.KeyUp += (s2, e2) => { _cfg.Svc = tSvc.Text.Trim(); };
-            var tCtr = InputFlex("容器名（协议端）", _cfg.Ctr, Body(conn), false);
-            tCtr.KeyUp += (s2, e2) => { _cfg.Ctr = tCtr.Text.Trim(); };
             var lSave = Line(Body(conn));
             var save = FBtn("保存连接", true, false);
             save.Click += (s, e) =>
@@ -1737,7 +1728,6 @@ namespace FishBotConsole
                 _cfg.Host = tHost.Text.Trim(); _cfg.User = tUser.Text.Trim();
                 _cfg.Pass = tPass.Text; _cfg.HostKey = tFp.Text.Trim();
                 _cfg.WebuiToken = tWebui.Text.Trim();
-            try { _cfg.Svc = tSvc.Text.Trim(); _cfg.Ctr = tCtr.Text.Trim(); } catch { }
                 _cfg.Save(); Log("连接设置已保存"); RefreshStatus();
             };
             lSave.Controls.Add(save);
@@ -1835,7 +1825,7 @@ namespace FishBotConsole
                 "机器人插件：肥鱼人设.py · v27",
                 "云端：Ubuntu 22.04 · Python 3.10.12 · nonebot2 2.5.0 · nonebot-adapter-onebot 2.4.6",
                 "协议端：SnowLuma（Docker 容器 snowluma）· OneBot v11 · WS 127.0.0.1:3001",
-                "进程管理：systemd 服务 {svc}（Restart=on-failure，关闭走 stop.flag 告别）",
+                "进程管理：systemd 服务 fishbot（Restart=on-failure，关闭走 stop.flag 告别）",
                 "SSH：plink.exe（PuTTY 0.85）· base64 传输 · -hostkey 固定指纹",
                 "模型：deepseek-v4-flash-0731（文字）／deepseek-v4-flash-vision（看图）",
                 "存储：无数据库，全部 data/*.json（ai_state / memory / roster / sticker_index）"
@@ -1897,6 +1887,308 @@ namespace FishBotConsole
             Body(sCloud).Controls.Add(Txt("/opt/qqbot/stickers　287 张表情包（43MB）", 9f, false, _th.Sub));
             AddRow(page, sCloud, false);
             return page;
+        }
+
+        // ============================================================ 页面：机器人控件
+        Panel PageBotCtl()
+        {
+            TableLayoutPanel tbl;
+            var page = Grid(out tbl);
+
+            string curChat = "";
+            bool onlyAt = false;
+            int maxLen = 26;
+            double speed = 1.0;
+
+            // ---------- 选群 ----------
+            var c1 = FlexCard("选一个群");
+            var groupBox = new ComboBox();
+            groupBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            groupBox.Font = F(9.5f);
+            groupBox.BackColor = _th.Dark ? Color.FromArgb(30, 31, 34) : Color.White;
+            groupBox.ForeColor = _th.Text;
+            groupBox.Width = Math.Max(Sc(220), _cardW - Sc(160));
+            groupBox.Height = Sc(30);
+            var groupRow = Line(Body(c1));
+            groupRow.WrapContents = true;
+            groupBox.Width = Math.Max(Sc(240), _cardW - Sc(320));
+            groupRow.Controls.Add(groupBox);
+            var gidInput = new TextBox();
+            gidInput.Font = F(9.5f);
+            gidInput.BorderStyle = BorderStyle.FixedSingle;
+            gidInput.BackColor = _th.Dark ? Color.FromArgb(30, 31, 34) : Color.White;
+            gidInput.ForeColor = _th.Text;
+            gidInput.Width = Sc(120);
+            gidInput.Margin = new Padding(Sc(8), 0, 0, 0);
+            Tip(gidInput, "也可以直接填群号，按「载入」");
+            groupRow.Controls.Add(gidInput);
+            var btnLoad = SoftBtn("载入");
+            btnLoad.Margin = new Padding(Sc(8), 0, 0, 0);
+            groupRow.Controls.Add(btnLoad);
+            var btnRefresh = SoftBtn("刷新群列表");
+            btnRefresh.Margin = new Padding(Sc(8), 0, 0, 0);
+            groupRow.Controls.Add(btnRefresh);
+            Body(c1).Controls.Add(Txt("勾选「只回 @」后，她在这个群只有被 @ 才说话。", 9f, false, _th.Sub));
+            AddRow(page, c1, false);
+
+            // ---------- 行为 ----------
+            var c2 = FlexCard("她在这个群怎么说话");
+
+            // 仅@后回复
+            var rowAt = Line(Body(c2));
+            rowAt.WrapContents = false;
+            var lbAt = Txt("仅接受 @ 后回复", 9.5f, false, _th.Text);
+            lbAt.AutoSize = false;
+            lbAt.Width = Sc(150);
+            lbAt.Height = Sc(30);
+            lbAt.TextAlign = ContentAlignment.MiddleLeft;
+            rowAt.Controls.Add(lbAt);
+            var btnAt = FBtn("关闭", false, false);
+            btnAt.Width = Sc(90);
+            rowAt.Controls.Add(btnAt);
+
+            // 回复速度
+            var rowSp = Line(Body(c2));
+            rowSp.WrapContents = false;
+            var lbSp = Txt("回复速度", 9.5f, false, _th.Text);
+            lbSp.AutoSize = false;
+            lbSp.Width = Sc(150);
+            lbSp.Height = Sc(30);
+            lbSp.TextAlign = ContentAlignment.MiddleLeft;
+            rowSp.Controls.Add(lbSp);
+            var bar = new TrackBar();
+            bar.Minimum = 30;       // 0.30x
+            bar.Maximum = 300;      // 3.00x
+            bar.TickFrequency = 30;
+            bar.Value = 100;
+            bar.Width = Math.Max(Sc(240), _cardW - Sc(320));
+            bar.Height = Sc(34);
+            bar.BackColor = _th.Card;
+            rowSp.Controls.Add(bar);
+            var lbSpVal = Txt("1.00x", 9.5f, true, _th.Accent);
+            lbSpVal.AutoSize = false;
+            lbSpVal.Width = Sc(70);
+            lbSpVal.Height = Sc(30);
+            lbSpVal.TextAlign = ContentAlignment.MiddleLeft;
+            lbSpVal.Margin = new Padding(Sc(8), 0, 0, 0);
+            rowSp.Controls.Add(lbSpVal);
+            Body(c2).Controls.Add(Txt("1.00x 是默认；小于 1 更快（0.3 最快），大于 1 更慢（3.0 最慢）。", 9f, false, _th.Sub));
+
+            // 句式长度
+            var rowLen = Line(Body(c2));
+            rowLen.WrapContents = false;
+            var lbLen = Txt("句式长度", 9.5f, false, _th.Text);
+            lbLen.AutoSize = false;
+            lbLen.Width = Sc(150);
+            lbLen.Height = Sc(30);
+            lbLen.TextAlign = ContentAlignment.MiddleLeft;
+            rowLen.Controls.Add(lbLen);
+            var btn14 = FBtn("14", false, false);
+            var btn26 = FBtn("26", false, false);
+            var btn40 = FBtn("40", false, false);
+            foreach (var b in new Control[] { btn14, btn26, btn40 })
+            {
+                b.Width = Sc(64);
+                b.Margin = new Padding(0, 0, Sc(8), 0);
+                rowLen.Controls.Add(b);
+            }
+            var lbLenVal = Txt("当前：26 字", 9.5f, true, _th.Accent);
+            lbLenVal.AutoSize = false;
+            lbLenVal.Width = Sc(120);
+            lbLenVal.Height = Sc(30);
+            lbLenVal.TextAlign = ContentAlignment.MiddleLeft;
+            lbLenVal.Margin = new Padding(Sc(8), 0, 0, 0);
+            rowLen.Controls.Add(lbLenVal);
+            Body(c2).Controls.Add(Txt("超过这个字数的回复会被截断；14 很短、26 适中、40 能说完整句子。", 9f, false, _th.Sub));
+            AddRow(page, c2, false);
+
+            // ---------- 保存 ----------
+            var c3 = FlexCard("保存");
+            var rowSave = Line(Body(c3));
+            rowSave.WrapContents = false;
+            var btnSave = FBtn("保存到这个群", true, false);
+            btnSave.Width = Sc(150);
+            rowSave.Controls.Add(btnSave);
+            var btnReload = SoftBtn("重新读取");
+            btnReload.Margin = new Padding(Sc(10), 0, 0, 0);
+            rowSave.Controls.Add(btnReload);
+            var status = Txt("选个群，先「载入」看当前设置。", 9f, false, _th.Sub);
+            Body(c3).Controls.Add(status);
+            AddRow(page, c3, false);
+
+            // ---------- 逻辑 ----------
+            Action refreshAt = () =>
+            {
+                btnAt.Text = onlyAt ? "已开启" : "关闭";
+                btnAt.Fill = onlyAt ? _th.Accent : (_th.Dark ? Color.FromArgb(44, 47, 53) : Color.Gainsboro);
+                btnAt.TextColor = onlyAt ? Color.White : _th.Text;
+                btnAt.Invalidate();
+            };
+            Action refreshLen = () =>
+            {
+                lbLenVal.Text = "当前：" + maxLen + " 字";
+                Func<Control, bool, Control> mark = (b, on) =>
+                {
+                    b.ForeColor = on ? _th.Accent : _th.Text;
+                    return b;
+                };
+                mark(btn14, maxLen == 14); mark(btn26, maxLen == 26); mark(btn40, maxLen == 40);
+            };
+            Action refreshSpeed = () =>
+            {
+                lbSpVal.Text = speed.ToString("0.00") + "x";
+                int v = (int)Math.Round(speed * 100);
+                if (v < bar.Minimum) v = bar.Minimum;
+                if (v > bar.Maximum) v = bar.Maximum;
+                if (bar.Value != v) bar.Value = v;
+            };
+
+            Action<string> applyRules = (json) =>
+            {
+                try
+                {
+                    var ser = new JavaScriptSerializer();
+                    var o = ser.DeserializeObject(json) as Dictionary<string, object>;
+                    var r = (o.ContainsKey("rules") ? o["rules"] : null) as Dictionary<string, object>;
+                    if (r != null)
+                    {
+                        onlyAt = Convert.ToBoolean(r.ContainsKey("only_at") ? r["only_at"] : false);
+                        maxLen = Convert.ToInt32(r.ContainsKey("max_len") ? r["max_len"] : 0);
+                        if (maxLen <= 0) maxLen = 26;
+                        speed = Convert.ToDouble(r.ContainsKey("speed") ? r["speed"] : 1.0);
+                        if (speed <= 0) speed = 1.0;
+                    }
+                    refreshAt(); refreshLen(); refreshSpeed();
+                }
+                catch (Exception ex) { status.Text = "解析失败：" + ex.Message; }
+            };
+
+            Action<string, bool> loadRules = (chat, quiet) =>
+            {
+                if (string.IsNullOrEmpty(chat)) { status.Text = "先选一个群。"; return; }
+                status.Text = "读取 " + chat + " …";
+                new Thread(() =>
+                {
+                    string enc = Uri.EscapeDataString(chat);
+                    string json = Remote("curl -s -m 20 '" + ChatApiBase + "/api/botctl?token=" + ChatApiToken
+                                         + "&chat=" + enc + "'", 40);
+                    BeginInvoke(new Action(() =>
+                    {
+                        applyRules(json);
+                        status.Text = quiet ? "已载入 " + chat : "已重新读取 " + chat;
+                    }));
+                }) { IsBackground = true }.Start();
+            };
+
+            Action loadGroups = () =>
+            {
+                status.Text = "拉群列表…";
+                new Thread(() =>
+                {
+                    string json = Remote("curl -s -m 25 '" + ChatApiBase + "/api/groups?token=" + ChatApiToken + "'", 45);
+                    BeginInvoke(new Action(() =>
+                    {
+                        groupBox.Items.Clear();
+                        try
+                        {
+                            var ser = new JavaScriptSerializer();
+                            var o = ser.DeserializeObject(json) as Dictionary<string, object>;
+                            var arr = o["items"] as object[];
+                            foreach (var it in arr)
+                            {
+                                var d = it as Dictionary<string, object>;
+                                string gid = Convert.ToString(d["gid"]);
+                                string nm = Convert.ToString(d["name"]);
+                                string text = "群 " + gid + (string.IsNullOrEmpty(nm) ? "" : "  · " + nm);
+                                groupBox.Items.Add(new GroupItem(gid, text));
+                            }
+                        }
+                        catch (Exception ex) { status.Text = "群列表解析失败：" + ex.Message; }
+                        if (groupBox.Items.Count > 0)
+                        {
+                            groupBox.SelectedIndex = 0;
+                            var gi = groupBox.SelectedItem as GroupItem;
+                            if (gi != null) { curChat = "群 " + gi.Gid; loadRules(curChat, true); }
+                        }
+                        else status.Text = "没拿到群列表（协议端没连上？）";
+                    }));
+                }) { IsBackground = true }.Start();
+            };
+
+            btnAt.Click += (s2, e2) => { onlyAt = !onlyAt; refreshAt(); };
+            btn14.Click += (s2, e2) => { maxLen = 14; refreshLen(); };
+            btn26.Click += (s2, e2) => { maxLen = 26; refreshLen(); };
+            btn40.Click += (s2, e2) => { maxLen = 40; refreshLen(); };
+            bar.Scroll += (s2, e2) => { speed = bar.Value / 100.0; refreshSpeed(); };
+            groupBox.SelectedIndexChanged += (s2, e2) =>
+            {
+                var gi = groupBox.SelectedItem as GroupItem;
+                if (gi == null) return;
+                curChat = "群 " + gi.Gid;
+                gidInput.Text = gi.Gid;
+                loadRules(curChat, true);
+            };
+            btnLoad.Click += (s2, e2) =>
+            {
+                string g = "";
+                foreach (char ch in (gidInput.Text ?? ""))
+                    if (char.IsDigit(ch)) g += ch;
+                if (g.Length < 5) { status.Text = "群号看着不对。"; return; }
+                curChat = "群 " + g;
+                loadRules(curChat, true);
+            };
+            btnRefresh.Click += (s2, e2) => loadGroups();
+            btnReload.Click += (s2, e2) => loadRules(curChat, false);
+
+            btnSave.Click += (s2, e2) =>
+            {
+                if (string.IsNullOrEmpty(curChat)) { status.Text = "先选一个群。"; return; }
+                btnSave.Enabled = false;
+                status.Text = "保存中…";
+                bool _at = onlyAt; int _len = maxLen; double _sp = speed; string _chat = curChat;
+                new Thread(() =>
+                {
+                    var payload = new Dictionary<string, object>();
+                    payload["chat"] = _chat;
+                    payload["only_at"] = _at;
+                    payload["max_len"] = _len;
+                    payload["speed"] = Math.Round(_sp, 2);
+                    string body = new JavaScriptSerializer().Serialize(payload);
+                    string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(body));
+                    string cmd = "echo " + b64 + " | base64 -d > /tmp/botctl.json; "
+                               + "curl -s -m 30 -X POST -H 'Content-Type: application/json' --data-binary @/tmp/botctl.json "
+                               + "'" + ChatApiBase + "/api/botctl?token=" + ChatApiToken + "'";
+                    string r = Remote(cmd, 60);
+                    BeginInvoke(new Action(() =>
+                    {
+                        btnSave.Enabled = true;
+                        try
+                        {
+                            var ser = new JavaScriptSerializer();
+                            var o = ser.DeserializeObject(r) as Dictionary<string, object>;
+                            bool ok = o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
+                            status.Text = ok
+                                ? "已保存：" + _chat + " → 仅@" + (_at ? "开" : "关")
+                                  + "，长度 " + _len + "，速度 " + _sp.ToString("0.00") + "x"
+                                : ("保存失败：" + (o.ContainsKey("msg") ? Convert.ToString(o["msg"]) : r));
+                            if (ok) applyRules(r);
+                        }
+                        catch (Exception ex) { status.Text = "保存返回异常：" + ex.Message; }
+                    }));
+                }) { IsBackground = true }.Start();
+            };
+
+            refreshAt(); refreshLen(); refreshSpeed();
+            page.HandleCreated += (s2, e2) => { if (groupBox.Items.Count == 0) loadGroups(); };
+            return page;
+        }
+
+        class GroupItem
+        {
+            public string Gid = "";
+            public string Text = "";
+            public GroupItem(string g, string t) { Gid = g; Text = t; }
+            public override string ToString() { return Text; }
         }
 
         // ============================================================ 页面：使用文档
@@ -2013,7 +2305,7 @@ namespace FishBotConsole
 
             // ---------- 4. 语音速查 ----------
             var c4 = FlexCard("语音速查");
-            Body(c4).Controls.Add(Txt("• 换音色：改 /opt/qqbot/.env 的 FISH_VOICE_SF_VOICE，然后 sudo systemctl restart {svc}", 9f, false, _th.Sub));
+            Body(c4).Controls.Add(Txt("• 换音色：改 /opt/qqbot/.env 的 FISH_VOICE_SF_VOICE，然后 sudo systemctl restart fishbot", 9f, false, _th.Sub));
             Body(c4).Controls.Add(Txt("• 换语速：FISH_VOICE_SF_SPEED（别低于 1.05，1.02 会让模型把句子念断）", 9f, false, _th.Sub));
             Body(c4).Controls.Add(Txt("• 输出格式：必须是 SILK（FISH_VOICE_SILK=1），MP3 直发会被 QQ 二次转码，听着像劣质外放", 9f, false, _th.Sub));
             Body(c4).Controls.Add(Txt("• 中文音色只能用中文素材克隆；用日语素材克隆的音色念中文会变成乱码", 9f, false, _th.Sub));
@@ -2025,7 +2317,7 @@ namespace FishBotConsole
             var c5 = FlexCard("排错速查");
             string[][] errs = new string[][]
             {
-                new string[] { "群里不说话", "journalctl -u {svc} --since '10 min ago' | grep '\\[接收\\]' → 没收到就查协议端" },
+                new string[] { "群里不说话", "journalctl -u fishbot --since '10 min ago' | grep '\\[接收\\]' → 没收到就查协议端" },
                 new string[] { "收到但不回", "看日志里 ask_ai / AI 返回 HTTP：401 换 KEY，402/429 是额度或限流" },
                 new string[] { "掉线 / 被踢", "先重启容器；还不行点「登录二维码」用手机扫；别用同一号在别处登录" },
                 new string[] { "语音没声音", "journalctl 搜「语音 / silk / 语音日语版」；多半是音色与语言不匹配" },
@@ -2069,12 +2361,12 @@ namespace FishBotConsole
 
             string[][] cmds = new string[][]
             {
-                new string[] { "服务状态", "systemctl is-active {svc} fishweb" },
-                new string[] { "协议端容器", "sudo -n docker ps --format '{{.Names}} {{.Status}}' | grep {ctr} || echo 容器没起" },
+                new string[] { "服务状态", "systemctl is-active fishbot fishweb" },
+                new string[] { "协议端容器", "sudo -n docker ps --format '{{.Names}} {{.Status}}' | grep snowluma || echo 容器没起" },
                 new string[] { "登录情况", "curl -s -m 8 127.0.0.1:3000/get_login_info | head -c 220" },
                 new string[] { "内存", "free -m | head -2" },
-                new string[] { "最近日志", "journalctl -u {svc} -n 8 --no-pager" },
-                new string[] { "最近语音", "sudo -n docker exec {ctr} sh -lc 'ls -lt /app/data/voice | head -4'" },
+                new string[] { "最近日志", "journalctl -u fishbot -n 8 --no-pager" },
+                new string[] { "最近语音", "sudo -n docker exec snowluma sh -lc 'ls -lt /app/data/voice | head -4'" },
                 new string[] { "定时器", "systemctl list-timers 'fish*' --no-pager | head -5" },
                 new string[] { "手动发送日志", "tail -3 /opt/qqbot/data/manual_sent.log 2>/dev/null || echo 还没有手动发送记录" }
             };
@@ -2135,7 +2427,7 @@ namespace FishBotConsole
             {
                 if (MessageBox.Show(this, "要重启 fishbot + fishweb 吗？", "确认",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-                runCmd("重启服务", "sudo -n systemctl restart {svc} fishweb; sleep 3; systemctl is-active {svc} fishweb");
+                runCmd("重启服务", "sudo -n systemctl restart fishbot fishweb; sleep 3; systemctl is-active fishbot fishweb");
             };
             rowR.Controls.Add(bRestart);
             var lblR = Txt("重启 fishbot + fishweb（会二次确认）", 9f, false, _th.Danger);
@@ -2176,9 +2468,6 @@ namespace FishBotConsole
 
         string Remote(string bash, int timeoutSec)
         {
-            // 命令里的 {svc} / {ctr} 换成配置里的服务名、容器名
-            bash = (bash ?? "").Replace("{svc}", _cfg.Svc ?? "fishbot")
-                                .Replace("{ctr}", _cfg.Ctr ?? "");
             string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(bash));
             string inner = "echo " + b64 + " | base64 -d | sudo -n bash -s";
             return RunProc(PlinkPath(),
@@ -2226,10 +2515,10 @@ namespace FishBotConsole
         void DoRefresh()
         {
             string script =
-                "echo SVC=$(systemctl is-active {svc})\n" +
+                "echo SVC=$(systemctl is-active fishbot)\n" +
                 "echo NC=$(docker ps --format '{{.Names}}' | tr '\\n' ',')\n" +
                 "echo MEM=$(free -m | awk '/Mem:/{print $3\"/\"$2\" MB\"}')\n" +
-                "echo UP=$(systemctl show -p ActiveEnterTimestamp --value {svc})\n";
+                "echo UP=$(systemctl show -p ActiveEnterTimestamp --value fishbot)\n";
             string o = Remote(script, 25);
             Log("原始返回: " + o.Replace("\r", "").Replace("\n", " | ").Trim());
             if (o.Trim().Length == 0 || o.IndexOf("FATAL ERROR") >= 0 || o.IndexOf("[执行失败]") >= 0)
@@ -2244,12 +2533,12 @@ namespace FishBotConsole
             SetBig(active ? "● 运行中（云端）" : "● 已停止（云端）", active ? _th.Ok : _th.Danger);
             bool webui = WebUiReachable(3000);
             SetSubParts("服务 " + svc,
-                        "容器 " + (nc.IndexOf(_cfg.Ctr ?? "") >= 0 ? _cfg.Ctr + " 在跑" : "无"),
+                        "容器 " + (nc.IndexOf("snowluma") >= 0 ? "snowluma 在跑" : "无"),
                         "WebUI " + (webui ? "通" : "不通"),
                         "内存 " + mem,
                         "启动于 " + (up.Length > 0 ? up : "-"));
             FillParts(_vmLine, "  ·  ", "虚拟机 " + VmState(), "同一 QQ 号只能一处在线");
-            Log("状态 " + svc + " / 容器 " + (nc.IndexOf(_cfg.Ctr ?? "") >= 0 ? "ok" : "缺") + " / 内存 " + mem);
+            Log("状态 " + svc + " / 容器 " + (nc.IndexOf("snowluma") >= 0 ? "ok" : "缺") + " / 内存 " + mem);
         }
 
         void SetBig(string t, Color c)
@@ -2370,8 +2659,8 @@ namespace FishBotConsole
                 try
                 {
                     string script = act == "stop"
-                        ? "touch /opt/qqbot/data/stop.flag; sleep 11; systemctl is-active {svc}"
-                        : "systemctl " + act + " {svc}; sleep 2; systemctl is-active {svc}";
+                        ? "touch /opt/qqbot/data/stop.flag; sleep 11; systemctl is-active fishbot"
+                        : "systemctl " + act + " fishbot; sleep 2; systemctl is-active fishbot";
                     string o = Remote(script, act == "stop" ? 70 : 60);
                     Log("云端：" + label + " → " + LastLine(o));
                     Thread.Sleep(1200);
@@ -2391,7 +2680,7 @@ namespace FishBotConsole
             {
                 try
                 {
-                    string o = Remote("journalctl -u {svc} -n 60 --no-pager -o cat", 40);
+                    string o = Remote("journalctl -u fishbot -n 60 --no-pager -o cat", 40);
                     foreach (var ln in o.Replace("\r", "").Split('\n'))
                         if (ln.Trim().Length > 0) Log("  " + ln);
                     Log("---- 结束 ----");
@@ -2403,10 +2692,10 @@ namespace FishBotConsole
 
         string QrShotScript()
         {
-            return "sudo -n docker exec -u {ctr} -e DISPLAY=:1 {ctr} sh -lc "
+            return "sudo -n docker exec -u snowluma -e DISPLAY=:1 snowluma sh -lc "
                  + "\"ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
                  + "-vf 'crop=220:220:852:434,scale=660:660:flags=neighbor' -frames:v 1 -y /tmp/q.png\" >/dev/null 2>&1; "
-                 + "sudo -n docker exec {ctr} sh -lc 'base64 -w0 /tmp/q.png 2>/dev/null'";
+                 + "sudo -n docker exec snowluma sh -lc 'base64 -w0 /tmp/q.png 2>/dev/null'";
         }
 
         void FetchQrText()
@@ -2449,18 +2738,18 @@ namespace FishBotConsole
 
         static string DiagScript()
         {
-            return "echo SVC=$(systemctl is-active {svc} 2>/dev/null); "
-                 + "echo NAP=$(sudo -n docker inspect -f '{{.State.Running}}' {ctr} 2>/dev/null | grep -c true); "
-                 + "echo RESTART=$(sudo -n docker inspect {ctr} --format '{{.RestartCount}}' 2>/dev/null || echo 0); "
-                 + "echo LOGINOK=$(curl -s -m 6 -H 'Authorization: Bearer CHANGE_ME_ONEBOT_TOKEN' "
+            return "echo SVC=$(systemctl is-active fishbot 2>/dev/null); "
+                 + "echo NAP=$(sudo -n docker inspect -f '{{.State.Running}}' snowluma 2>/dev/null | grep -c true); "
+                 + "echo RESTART=$(sudo -n docker inspect snowluma --format '{{.RestartCount}}' 2>/dev/null || echo 0); "
+                 + "echo LOGINOK=$(curl -s -m 6 -H 'Authorization: Bearer mbVTYSJGtMmi9LkNF_t2QjJLlX9pQhqyoGOPtINfzAE' "
                  + "http://127.0.0.1:3000/get_login_info 2>/dev/null | grep -c '\"status\":\"ok\"'); "
-                 + "echo RX3=$(journalctl -u {svc} --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
-                 + "echo TX3=$(journalctl -u {svc} --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[发送]'); "
-                 + "echo RX60=$(journalctl -u {svc} --since '60 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
-                 + "echo CONNECTEDNOW=$(journalctl -u {svc} --since '3 hours ago' --no-pager 2>/dev/null "
+                 + "echo RX3=$(journalctl -u fishbot --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
+                 + "echo TX3=$(journalctl -u fishbot --since '3 min ago' --no-pager 2>/dev/null | grep -cF '[发送]'); "
+                 + "echo RX60=$(journalctl -u fishbot --since '60 min ago' --no-pager 2>/dev/null | grep -cF '[接收]'); "
+                 + "echo CONNECTEDNOW=$(journalctl -u fishbot --since '3 hours ago' --no-pager 2>/dev/null "
                  + "| grep -E 'connected|Trying to reconnect' | tail -1 | grep -c connected); "
-                 + "echo LASTRX=$(journalctl -u {svc} --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[接收]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1); "
-                 + "echo LASTTX=$(journalctl -u {svc} --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[发送]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1)";
+                 + "echo LASTRX=$(journalctl -u fishbot --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[接收]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1); "
+                 + "echo LASTTX=$(journalctl -u fishbot --since '24 hours ago' --no-pager 2>/dev/null | grep -F '[发送]' | tail -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1)";
         }
 
         void ApplyDiag(string raw, bool webui)
@@ -2512,7 +2801,7 @@ namespace FishBotConsole
             else if (nap == 0)
             {
                 verdict = "不在线：协议端容器没起来";
-                hint = "点「一键修复」会 docker start {ctr}（约 30 秒）。";
+                hint = "点「一键修复」会 docker start snowluma（约 30 秒）。";
                 color = _th.Danger;
             }
             else if (busy)
@@ -2566,7 +2855,7 @@ namespace FishBotConsole
             {
                 new Thread(() =>
                 {
-                    try { Remote("sudo -n docker start {ctr} 2>&1; echo done", 60); Log("已尝试启动 {ctr} 容器"); }
+                    try { Remote("sudo -n docker start snowluma 2>&1; echo done", 60); Log("已尝试启动 snowluma 容器"); }
                     catch (Exception ex) { Log("启动失败: " + ex.Message); }
                     Thread.Sleep(1500);
                     RunDiagnosis();
@@ -2668,7 +2957,7 @@ namespace FishBotConsole
                 {
                     try
                     {
-                        Remote("sudo -n docker restart {ctr} >/dev/null 2>&1; sleep 22", 60);
+                        Remote("sudo -n docker restart snowluma >/dev/null 2>&1; sleep 22", 60);
                         Thread.Sleep(1200);
                         LoadQr(pic, tip);
                     }
@@ -2694,12 +2983,12 @@ namespace FishBotConsole
         // 取二维码：容器里点「刷新」→ 挪开鼠标 → 截屏裁图 → 容器里 base64 → 传回来
         string QrScript()
         {
-            return "sudo -n docker exec -u {ctr} -e DISPLAY=:1 {ctr} sh -lc 'xdotool mousemove 961 581 click 1' >/dev/null 2>&1; "
+            return "sudo -n docker exec -u snowluma -e DISPLAY=:1 snowluma sh -lc 'xdotool mousemove 961 581 click 1' >/dev/null 2>&1; "
                  + "sleep 3; "
-                 + "sudo -n docker exec -u {ctr} -e DISPLAY=:1 {ctr} sh -lc \"xdotool mousemove 1500 950; "
+                 + "sudo -n docker exec -u snowluma -e DISPLAY=:1 snowluma sh -lc \"xdotool mousemove 1500 950; "
                  + "ffmpeg -loglevel error -f x11grab -video_size 1920x1080 -i :1 "
                  + "-vf 'crop=220:220:852:434,scale=660:660:flags=neighbor' -frames:v 1 -y /tmp/qr_ui.png\" >/dev/null 2>&1; "
-                 + "sudo -n docker exec {ctr} sh -lc 'base64 -w0 /tmp/qr_ui.png'";
+                 + "sudo -n docker exec snowluma sh -lc 'base64 -w0 /tmp/qr_ui.png'";
         }
 
         public byte[] FetchQrPng()
@@ -2753,7 +3042,7 @@ namespace FishBotConsole
             {
                 try
                 {
-                    string o = Remote("sudo -n docker restart {ctr} >/dev/null 2>&1; sleep 25; sudo -n docker ps --format '{{.Names}} {{.Status}}'", 120);
+                    string o = Remote("sudo -n docker restart snowluma >/dev/null 2>&1; sleep 25; sudo -n docker ps --format '{{.Names}} {{.Status}}'", 120);
                     Log("容器：" + FirstLine(o));
                 }
                 catch (Exception e) { Log("重启容器失败: " + e.Message); }
@@ -3321,7 +3610,7 @@ namespace FishBotConsole
             if (args.Length > 0 && args[0].TrimStart('-').ToLower() == "status")
             {
                 var f = new MainForm();
-                string o = f.Remote("systemctl is-active {svc}", 20);
+                string o = f.Remote("systemctl is-active fishbot", 20);
                 File.WriteAllText(Path.Combine(Path.GetTempPath(), "fish_cli_result.json"),
                     "{\"ok\":true,\"raw\":\"" + o.Replace("\r", "").Replace("\n", " ").Replace("\"", "'") + "\"}",
                     new UTF8Encoding(false));

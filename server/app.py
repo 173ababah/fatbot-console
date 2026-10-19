@@ -922,6 +922,118 @@ def action(name):
     return "未知操作"
 
 
+
+# ---------------------------------------------------------------- 机器人控件（每群规则）
+def _rules_path():
+    base = globals().get("BOT_DIR") or "/opt/qqbot"
+    return os.path.join(str(base), "data", "group_rules.json")
+
+
+def _rules_load():
+    try:
+        with open(_rules_path(), "r", encoding="utf-8-sig") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _rules_save(d):
+    p = _rules_path()
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        return True, ""
+    except OSError as e:
+        return False, str(e)
+
+
+DEFAULT_BOTCTL = {"only_at": False, "max_len": 26, "speed": 1.0}
+
+
+def _gid_of_chat(chat):
+    m = re.match(r"^(群|私聊)\s*(\d+)$", (chat or "").strip())
+    if not m:
+        return ""
+    return m.group(2) if m.group(1) == "群" else ""
+
+
+def groups_list():
+    """优先问协议端要群列表；拿不到就用聊天记录里的群"""
+    out = []
+    try:
+        res = ob_call("get_group_list", {}, timeout=12)
+        for g in ((res or {}).get("data") or []):
+            out.append({"gid": str(g.get("group_id")), "name": g.get("group_name") or "",
+                        "members": g.get("member_count") or 0})
+    except Exception:
+        pass
+    if not out:
+        seen = {}
+        for c in conversations():
+            gid = _gid_of_chat(c.get("chat"))
+            if gid and gid not in seen:
+                seen[gid] = True
+                out.append({"gid": gid, "name": "", "members": 0})
+    for g in out:
+        r = _rules_load().get(g["gid"]) or {}
+        g["only_at"] = bool(r.get("only_at", False))
+        g["max_len"] = int(r.get("max_len", 0) or 0)
+        try:
+            g["speed"] = float(r.get("speed", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            g["speed"] = 1.0
+    out.sort(key=lambda x: x["gid"])
+    return out
+
+
+def botctl_get(chat):
+    gid = _gid_of_chat(chat)
+    if not gid:
+        return {"ok": False, "msg": "只支持群（私聊没有这些规则）"}
+    r = _rules_load().get(gid) or {}
+    cur = dict(DEFAULT_BOTCTL)
+    cur["only_at"] = bool(r.get("only_at", False))
+    cur["max_len"] = int(r.get("max_len", 0) or 0)
+    try:
+        cur["speed"] = float(r.get("speed", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        cur["speed"] = 1.0
+    return {"ok": True, "chat": chat, "gid": gid, "rules": cur}
+
+
+def botctl_set(body):
+    chat = (body.get("chat") or "").strip()
+    gid = _gid_of_chat(chat)
+    if not gid:
+        return {"ok": False, "msg": "只支持群（例：群 123456789）"}
+    data = _rules_load()
+    rec = data.get(gid)
+    if not isinstance(rec, dict):
+        rec = {}
+        data[gid] = rec
+    if "only_at" in body:
+        rec["only_at"] = bool(body.get("only_at"))
+    if "max_len" in body:
+        try:
+            ml = int(body.get("max_len") or 0)
+        except (TypeError, ValueError):
+            ml = 0
+        rec["max_len"] = max(0, min(200, ml))
+    if "speed" in body:
+        try:
+            sp = float(body.get("speed") or 1.0)
+        except (TypeError, ValueError):
+            sp = 1.0
+        rec["speed"] = max(0.2, min(5.0, round(sp, 2)))
+    ok, err = _rules_save(data)
+    if not ok:
+        return {"ok": False, "msg": "保存失败：%s" % err}
+    _MSG_CACHE["ts"] = 0
+    return {"ok": True, "chat": chat, "gid": gid, "rules": botctl_get(chat)["rules"]}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "FishWeb/1.0"
 
@@ -999,6 +1111,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, health())
         if path == "/api/info":
             return self._send(200, info())
+        if path == "/api/groups":
+            return self._send(200, {"items": groups_list()})
+        if path == "/api/botctl":
+            chat = (q.get("chat", [""])[0] or "").strip()
+            return self._send(200, botctl_get(chat))
         if path == "/api/messages":
             limit = int(q.get("limit", ["120"])[0])
             chat = (q.get("chat", [""])[0] or "").strip() or None
@@ -1039,6 +1156,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         path = u.path
+        if path == "/api/botctl":
+            return self._send(200, botctl_set(body or {}))
         if path == "/api/ingest":
             items = body.get("events") if isinstance(body.get("events"), list) else body
             n, err = ingest_write(items)
