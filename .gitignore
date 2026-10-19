@@ -1,0 +1,19 @@
+# 编译产物
+*.exe
+*.apk
+*.dll
+*.pdb
+bin/
+obj/
+build/
+dist/
+# 密钥与本地配置
+.env
+*.keystore
+*.jks
+local.properties
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

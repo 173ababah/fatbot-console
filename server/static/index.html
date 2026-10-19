@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#141518">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>肥鱼控制台</title>
+<style>
+  :root{
+    --bg:#141518; --card:#1d1f23; --card2:#22252a; --line:#2c2f35;
+    --text:#e8eaed; --sub:#9aa3af; --accent:#4a7bff; --accent2:#2b3d6b;
+    --ok:#3fc878; --danger:#ef5b60; --warn:#f0b429;
+    --r:16px; --pad:14px;
+    --fs:16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"PingFang SC","HarmonyOS Sans SC","Source Han Sans SC",system-ui,sans-serif;
+    font-size:var(--fs); overscroll-behavior-y:contain;}
+  body{padding:calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 84px);}
+  h1{font-size:1.35rem;margin:2px 0 2px;font-weight:700;letter-spacing:.5px}
+  .sub{color:var(--sub);font-size:.78rem;margin-bottom:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    padding:var(--pad);margin-bottom:12px}
+  .row{display:flex;align-items:center;gap:10px}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .dot{width:12px;height:12px;border-radius:50%;background:var(--sub);flex:0 0 auto}
+  .dot.ok{background:var(--ok);box-shadow:0 0 10px rgba(63,200,120,.6)}
+  .dot.bad{background:var(--danger);box-shadow:0 0 10px rgba(239,91,96,.6)}
+  .big{font-size:1.32rem;font-weight:700}
+  .muted{color:var(--sub);font-size:.82rem;line-height:1.6}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .btn{appearance:none;border:0;border-radius:14px;padding:16px 10px;font-size:1rem;
+    font-weight:600;color:var(--text);background:var(--card2);border:1px solid var(--line);
+    min-height:56px;display:flex;align-items:center;justify-content:center;gap:6px;
+    transition:transform .06s ease, filter .15s ease}
+  .btn:active{transform:scale(.97);filter:brightness(1.25)}
+  .btn.primary{background:linear-gradient(180deg,#5b86ff,#3f6aef);border-color:transparent;color:#fff;
+    box-shadow:0 6px 18px rgba(74,123,255,.35)}
+  .btn.danger{background:linear-gradient(180deg,#f2666b,#e04a50);border-color:transparent;color:#fff;
+    box-shadow:0 6px 18px rgba(239,91,96,.3)}
+  .btn.ghost{background:transparent}
+  .btn small{font-weight:400;color:var(--sub);font-size:.72rem}
+  .kvs{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin-top:10px;font-size:.85rem}
+  .kvs b{color:var(--sub);font-weight:500}
+  pre{margin:0;white-space:pre-wrap;word-break:break-all;font-size:.74rem;line-height:1.55;
+    color:#c7ccd4;background:#0f1013;border-radius:12px;padding:10px;max-height:46vh;overflow:auto}
+  .tabs{display:flex;gap:6px;margin:0 0 12px}
+  .tab{flex:1;text-align:center;padding:12px 4px;border-radius:12px;background:var(--card);
+    border:1px solid var(--line);color:var(--sub);font-size:.82rem;font-weight:600;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tab.on{background:var(--accent2);color:#dfe7ff;border-color:transparent}
+  .page{display:none}
+  .page.on{display:block}
+  img.qr{width:100%;max-width:340px;display:block;margin:10px auto;border-radius:12px;background:#fff;padding:8px}
+  .pill{font-size:.72rem;padding:4px 10px;border-radius:999px;background:var(--card2);
+    color:var(--sub);border:1px solid var(--line)}
+  .chk{margin-top:12px;display:flex;flex-direction:column;gap:9px}
+  .chk .it{display:flex;gap:9px;align-items:flex-start;font-size:.85rem;line-height:1.5}
+  .chk .mk{flex:0 0 auto;width:18px;text-align:center;font-weight:700}
+  .chk .mk.ok{color:var(--ok)}
+  .chk .mk.no{color:var(--danger)}
+  .chk .nm{font-weight:600}
+  .chk .dt{color:var(--sub)}
+  .footer{position:fixed;left:0;right:0;bottom:0;padding:8px 12px calc(env(safe-area-inset-bottom) + 8px);
+    background:rgba(20,21,24,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+    display:flex;gap:8px}
+  .footer .btn{flex:1;min-height:50px;padding:12px 6px;font-size:.92rem}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.35);
+    border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 92px);
+    background:#2a2d33;color:#fff;padding:10px 16px;border-radius:12px;font-size:.85rem;
+    opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:88vw;text-align:center}
+  .toast.on{opacity:1}
+</style>
+</head>
+<body>
+  <h1>肥鱼控制台</h1>
+  <div class="sub" id="clock">手机版 · 加载中…</div>
+
+  <div class="tabs">
+    <div class="tab on" data-p="home">状态</div>
+    <div class="tab" data-p="self">自检</div>
+    <div class="tab" data-p="qr">扫码</div>
+    <div class="tab" data-p="logs">日志</div>
+  </div>
+
+  <!-- 状态页 -->
+  <div class="page on" id="p-home">
+    <div class="card">
+      <div class="row" style="gap:12px">
+        <span class="dot" id="dot"></span>
+        <div>
+          <div class="big" id="verdict">检查中…</div>
+          <div class="muted" id="hint"></div>
+        </div>
+      </div>
+      <div class="kvs">
+        <b>服务</b><span id="k-svc">–</span>
+        <b>协议端</b><span id="k-nap">–</span>
+        <b>内存</b><span id="k-mem">–</span>
+        <b>启动于</b><span id="k-up">–</span>
+        <b>最近收发</b><span id="k-flow">–</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="between"><b>控制</b><span class="pill" id="stamp">–</span></div>
+      <div class="btns">
+        <button class="btn primary" data-act="start">启动服务</button>
+        <button class="btn" data-act="restart">重启服务</button>
+        <button class="btn danger" data-act="stop">关闭（告别）</button>
+        <button class="btn" data-act="refresh">刷新状态</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="between"><b>协议端</b><span class="pill">SnowLuma</span></div>
+      <div class="btns">
+        <button class="btn" data-act="napcat-restart">重启协议端</button>
+        <a class="btn ghost" href="#" id="webui">SnowLuma WebUI</a>
+      </div>
+      <div class="muted" style="margin-top:8px">掉线（被踢/需要扫码）时，去「扫码」标签扫一下。</div>
+    </div>
+
+    <div class="card">
+      <div class="between"><b>看门狗</b><span class="pill" id="dog-pill">–</span></div>
+      <div class="muted" id="dog-line" style="margin-top:6px">每 3 分钟检查一次：掉线自动重启 NapCat，靠密码登录救回。</div>
+    </div>
+  </div>
+
+  <!-- 自检页 -->
+  <div class="page" id="p-self">
+    <div class="card">
+      <div class="row" style="gap:12px">
+        <span class="dot" id="s-dot"></span>
+        <div>
+          <div class="big" id="s-verdict">点「开始自检」</div>
+          <div class="muted" id="s-hint">一条条检查服务 / 容器 / 登录 / 连接 / 收发 / 看门狗</div>
+        </div>
+      </div>
+      <div class="chk" id="s-items"></div>
+      <div class="btns">
+        <button class="btn primary" id="s-run">开始自检</button>
+        <button class="btn" id="s-fix">一键修复</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 二维码页 -->
+  <div class="page" id="p-qr">
+    <div class="card">
+      <div class="between"><b>登录二维码</b><span class="pill" id="qr-age">–</span></div>
+      <img class="qr" id="qr" alt="二维码" src="">
+      <div class="muted" id="qr-tip">从容器里的 Linux QQ 实时截屏；用手机 QQ → 扫一扫。码过期就点「刷新二维码」。</div>
+      <div class="btns">
+        <button class="btn primary" id="qr-refresh">刷新二维码</button>
+        <button class="btn" data-act="bot-restart">重启协议端换码</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 日志页 -->
+  <div class="page" id="p-logs">
+    <div class="tabs" style="margin-bottom:10px">
+      <div class="tab on" data-l="msg">收发</div>
+      <div class="tab" data-l="run">运行</div>
+    </div>
+    <div class="card"><pre id="logbox">加载中…</pre></div>
+  </div>
+
+  <div class="footer">
+    <button class="btn" id="refresh-all">刷新</button>
+    <button class="btn primary" id="open-qr">扫码</button>
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('fish_token') || '';
+if (TOKEN) localStorage.setItem('fish_token', TOKEN);
+const api = (p) => p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+let logMode = 'msg';
+
+function toast(t){ const el=document.getElementById('toast'); el.textContent=t; el.classList.add('on');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('on'),2200); }
+
+async function getJSON(p){
+  const r = await fetch(api(p), {cache:'no-store'});
+  if(r.status===401) throw new Error('token 无效');
+  return await r.json();
+}
+async function postJSON(p, body){
+  const r = await fetch(api(p), {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body||{})});
+  if(r.status===401) throw new Error('token 无效');
+  return await r.json();
+}
+
+async function refreshStatus(){
+  try{
+    const d = await getJSON('/api/diag');
+    const s = d.status;
+    const online = /在线/.test(d.verdict);
+    document.getElementById('dot').className = 'dot ' + (online?'ok':'bad');
+    document.getElementById('verdict').textContent = d.verdict;
+    document.getElementById('hint').textContent = d.hint || '';
+    document.getElementById('k-svc').textContent = s.svc;
+    document.getElementById('k-nap').textContent = s.napcat ? '在跑' : '没起来';
+    document.getElementById('k-mem').textContent = s.mem || '–';
+    document.getElementById('k-up').textContent = (s.up||'').replace(' CST','') || '–';
+    document.getElementById('k-flow').textContent = '收 ' + s.rx + ' / 发 ' + s.tx;
+    document.getElementById('stamp').textContent = s.ts;
+    document.getElementById('clock').textContent = '手机版 · ' + s.ts + ' 更新';
+    if(d.qr_age >= 0) document.getElementById('qr-age').textContent = d.qr_age + ' 秒前生成';
+  }catch(e){ toast(e.message); }
+  try{
+    const h = await getJSON('/api/health');
+    const pill = document.getElementById('dog-pill');
+    pill.textContent = h.timer === 'active' ? '运行中' : '没在跑';
+    const last = (h.last || '').replace(/^\d{4}-\d{2}-\d{2} /, '');
+    document.getElementById('dog-line').textContent = h.count
+      ? ('已自愈 ' + h.count + ' 次 · 最近：' + last)
+      : '还没自愈过（一直没掉线，或刚启动）';
+  }catch(e){}
+}
+
+async function runSelfCheck(){
+  const d = document.getElementById('s-items');
+  d.innerHTML = '<div class="it"><span class="mk">·</span><span class="dt">检查中…</span></div>';
+  document.getElementById('s-verdict').textContent = '检查中…';
+  try{
+    const r = await getJSON('/api/selfcheck');
+    const online = /在线/.test(r.verdict);
+    document.getElementById('s-dot').className = 'dot ' + (online?'ok':'bad');
+    document.getElementById('s-verdict').textContent = r.verdict;
+    document.getElementById('s-hint').textContent = r.hint || '';
+    d.innerHTML = r.items.map(it =>
+      '<div class="it"><span class="mk ' + (it.ok?'ok':'no') + '">' + (it.ok?'✓':'!') + '</span>' +
+      '<span><span class="nm">' + it.name + '</span> <span class="dt">' + it.detail + '</span></span></div>'
+    ).join('');
+  }catch(e){ toast(e.message); }
+}
+
+async function fixByCheck(){
+  try{
+    const r = await getJSON('/api/selfcheck');
+    const bad = r.items.filter(x => !x.ok).map(x => x.name);
+    if(bad.length === 0){ toast('都正常，不用修'); return; }
+    let act = null;
+    if(bad.some(x=>x.indexOf('fishbot')>=0)) act = 'start';
+    else if(bad.some(x=>x.indexOf('NapCat 容器')>=0)) act = 'napcat-restart';
+    else if(bad.some(x=>x.indexOf('OneBot')>=0)) act = 'napcat-restart';
+    if(!act){ toast('需要扫码或手动处理：' + bad.join('、')); return; }
+    const res = await postJSON('/api/action', {name: act});
+    toast('已执行：' + act);
+    setTimeout(runSelfCheck, 6000);
+  }catch(e){ toast(e.message); }
+}
+
+async function loadQR(){
+  const img = document.getElementById('qr');
+  img.src = api('/api/qr') + '&fresh=1&t=' + Date.now();
+  img.onerror = () => { img.removeAttribute('src'); document.getElementById('qr-tip').textContent = '暂时取不到二维码，点「重启 NapCat 换码」试试。'; };
+}
+
+async function loadLogs(){
+  try{
+    if(logMode === 'msg'){
+      const d = await getJSON('/api/logs');
+      document.getElementById('logbox').textContent = d.lines.length ? d.lines.join('\n') : '（最近 1 小时没有收发）';
+    }else{
+      const d = await getJSON('/api/runlog');
+      document.getElementById('logbox').textContent = d.text || '（空）';
+    }
+  }catch(e){ toast(e.message); }
+}
+
+document.querySelectorAll('.tab[data-p]').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab[data-p]').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on');
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+  document.getElementById('p-' + t.dataset.p).classList.add('on');
+  if(t.dataset.p==='qr'){ loadQR(); if(window._qrTimer) clearInterval(window._qrTimer); window._qrTimer = setInterval(()=>{ if(document.getElementById('p-qr').classList.contains('on')) loadQR(); }, 20000); }
+  if(t.dataset.p==='logs') loadLogs();
+  if(t.dataset.p==='self') runSelfCheck();
+});
+document.getElementById('s-run').onclick = () => runSelfCheck();
+document.getElementById('s-fix').onclick = () => fixByCheck();
+document.querySelectorAll('.tab[data-l]').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab[data-l]').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on'); logMode = t.dataset.l; loadLogs();
+});
+
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+  const name = b.dataset.act;
+  if(name==='stop' && !confirm('关闭机器人？（会先发一句告别）')) return;
+  b.disabled = true; const old = b.innerHTML; b.innerHTML = '<span class="spin"></span>';
+  try{
+    const r = await postJSON('/api/action', {name});
+    toast(r.msg ? String(r.msg).slice(0,80) : '已执行');
+    setTimeout(refreshStatus, 1200);
+    if(name==='napcat-restart') setTimeout(()=>{loadQR();}, 18000);
+  }catch(e){ toast(e.message); }
+  b.disabled = false; b.innerHTML = old;
+});
+
+document.getElementById('qr-refresh').onclick = () => { loadQR(); toast('已刷新'); };
+document.getElementById('refresh-all').onclick = () => { refreshStatus(); if(document.getElementById('p-logs').classList.contains('on')) loadLogs(); };
+document.getElementById('open-qr').onclick = () => document.querySelector('.tab[data-p="qr"]').click();
+document.getElementById('webui').onclick = (e) => {
+  e.preventDefault();
+  location.href = 'http://' + location.hostname + ':5099/';
+};
+
+/* 首次进入：没 token 就提示 */
+if(!TOKEN){
+  document.getElementById('verdict').textContent = '需要 Token';
+  document.getElementById('hint').textContent = '在地址后面加 ?token=你的token 打开一次即可记住';
+}else{
+  refreshStatus(); setInterval(refreshStatus, 15000);
+  /* 安卓 WebView 桥：可选 */
+}
+</script>
+</body>
+</html>
