@@ -1,3 +1,64 @@
+## 一条命令装好（云服务器）
+
+> 一台**干净的云服务器**（Ubuntu 20.04+ / 2C2G 起），你只需要知道：公网 IP、SSH 账号密码、**机器人自己的 QQ 号**。
+> 剩下的（venv、9 个插件、systemd、控制台后端、扫码登录）脚本都会办。
+
+### 方式一：图形界面（推荐）
+
+```powershell
+pwsh -File deploy\setup.ps1
+```
+
+弹出小窗口，填 6 个格子（服务器 IP、SSH 用户、SSH 密码、机器人 QQ、超管 QQ、控制台口令），点「开始部署」。
+跑完直接给地址：
+
+```
+http://<你的服务器>:8090/?token=xxxxxxxx
+```
+
+同时在仓库根目录写一份 `console-config.json`，电脑端控制台读它就连上了。
+
+### 方式二：命令行
+
+```powershell
+pwsh -File deploy\setup.ps1 -Server 1.2.3.4 -SshUser ubuntu -SshPassword '你的密码' `
+  -Qq 123456789 -Admin 你的QQ -Token 面板口令 -NoGui
+```
+
+### 方式三：只在服务器上跑（已经有 SSH）
+
+```bash
+scp -r deploy server ubuntu@1.2.3.4:/tmp/fatbot/
+ssh ubuntu@1.2.3.4 "sudo bash /tmp/fatbot/deploy/install.sh --qq 123456789 --with-napcat"
+```
+
+`install.sh --help` 看全部参数（`--prefix` / `--port` / `--ws` / `--plugins` / `--no-systemd` / `--dry-run`）。
+
+## 装完之后
+
+| 你要做的 | 怎么做 |
+|---|---|
+| 让机器人登录 QQ | 控制台 →「扫码」→ 用**机器人那个号**扫 |
+| 换人设 | 改 `/opt/fishbot/persona_prompt.txt`，`sudo systemctl restart fishbot` |
+| 配文字模型 | 控制台「API 渠道」填 base / model / key（不填就用词库聊） |
+| 看日志 | `journalctl -u fishbot -f` |
+
+## 这套部署踩过的坑（脚本里都已修）
+
+1. **`pip install git+https://…` 会卡死** —— 部分机房到 github.com 的 git 端点超时，
+   但 codeload（zip 归档）是通的。插件一律用 `…/archive/refs/heads/main.zip` 装。
+2. **`install.sh` 必须是 LF** —— Windows 上编辑过会变 CRLF，bash 直接报
+   `$'\r': command not found`。`setup.ps1` 打包时强制转 LF。
+3. **上传不能走 stdin 管道** —— PowerShell 把大字符串喂给原生 stdin 会截断长行，
+   服务器就 `base64: invalid input`。改成 base64 切 3000 字符一段，逐段 `echo -n >> file`。
+4. **主机指纹** —— plink 在 `-batch` 下遇到新主机会直接放弃。做法：先跑一次从报错里抠出
+   `SHA256:…`，之后所有调用都带 `-hostkey`，全程无交互。
+5. **root 装、用户跑** —— 脚本要 root 写 systemd，但服务是 `ubuntu` 跑的；装完必须
+   `chown -R` 整个安装目录，否则 `webui/` 是 root:750，服务读不了。
+6. **干跑也要给标记** —— `setup.ps1` 用 ASCII 标记（`FATBOT_INSTALL_OK` / `FATBOT_WEB=`）判断成败，
+   不看中文（GBK 控制台下会乱码）。
+
+---
 # fatbot-console
 
 肥鱼机器人（一只住在 QQ 里的 AI 虚拟少女）的**控制台三件套**开源版。
