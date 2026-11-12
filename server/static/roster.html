@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>花名册 · 肥鱼控制台</title>
+<style>
+  :root{
+    --bg:#1a1b1e;         /* 窗口底 */
+    --side:#202226;       /* 左栏 */
+    --panel:#232529;      /* 右栏 */
+    --card:#2a2d33;       /* 行 / 卡片 */
+    --hover:#31353c;
+    --line:#34383f;
+    --txt:#e9eaec;
+    --sub:#8d939c;
+    --accent:#4a7bff;
+    --accent-soft:#2b3a5e;
+    --good:#4fbf7f;
+    --bad:#e0605f;
+  }
+  html[data-theme="light"]{
+    --bg:#f6f7fb; --side:#eef0f6; --panel:#ffffff; --card:#f4f6fa;
+    --hover:#e9edf5; --line:#e0e5ef; --txt:#141824; --sub:#5b6478;
+    --accent:#2f6fe4; --accent-soft:#dbe6ff; --good:#178a4c; --bad:#c4342d;
+  }
+  /* 塔菲的花名册：粉色一整套（?persona=taffy 时 JS 打上 data-persona="taffy"） */
+  html[data-persona="taffy"]{
+    --bg:#fff7fb; --side:#fff1f7; --panel:#ffffff; --card:#fff0f6;
+    --hover:#ffe6f1; --line:#ffd6e7; --txt:#3a1b2b; --sub:#b9829b;
+    --accent:#ff5fa2; --accent-soft:#ffdcea; --good:#e0498b; --bad:#c4342d;
+  }
+  html[data-persona="taffy"] .side-head h1{color:#ff4f98}
+  html[data-persona="taffy"] .conv.on{background:var(--accent-soft)}
+  html[data-persona="taffy"] .conv.on .nm{color:#a3185b}
+  html[data-persona="taffy"] ::-webkit-scrollbar-thumb{background:#ffc9de;background-clip:content-box}
+  html[data-persona="taffy"] ::-webkit-scrollbar-thumb:hover{background:#ffb3d2;background-clip:content-box}
+
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--txt);overflow:hidden;
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI",sans-serif;
+  }
+  .app{display:flex;height:100vh;height:100dvh}
+
+  /* ---------------- 左栏：会话列表 ---------------- */
+  .side{
+    width:272px;flex:0 0 272px;background:var(--side);
+    border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;
+  }
+  .side-head{padding:16px 16px 10px}
+  .side-head h1{margin:0;font-size:17px;letter-spacing:.3px}
+  .side-head .meta{margin-top:3px;color:var(--sub);font-size:12px}
+  .side-search{padding:0 12px 10px}
+  .side-search input{
+    width:100%;padding:8px 11px;border-radius:8px;border:1px solid var(--line);
+    background:var(--card);color:var(--txt);font-size:13px;outline:none;
+  }
+  .side-search input:focus{border-color:var(--accent)}
+  .conv-list{flex:1;overflow-y:auto;padding:0 8px 12px}
+  .conv{
+    display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;
+    cursor:pointer;user-select:none;
+  }
+  .conv:hover{background:var(--hover)}
+  .conv.on{background:var(--accent-soft)}
+  .conv .av{
+    width:40px;height:40px;flex:0 0 40px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:15px;color:#fff;
+  }
+  .conv .mid{flex:1;min-width:0}
+  .conv .nm{
+    font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .conv.on .nm{color:#dbe4ff}
+  .conv .sub{font-size:11.5px;color:var(--sub);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .conv .badge{
+    font-size:11px;color:var(--sub);background:var(--card);
+    border-radius:10px;padding:1px 7px;flex:0 0 auto;
+  }
+  /* 每日消息下载：群名右边的 ↓ */
+  .conv .dl{
+    flex:0 0 24px;display:flex;align-items:center;justify-content:center;
+    width:24px;height:24px;border-radius:7px;border:1px solid var(--line);
+    background:var(--card);color:#9fb4ff;font-size:14px;font-weight:700;line-height:1;
+    text-decoration:none;cursor:pointer;
+  }
+  .conv .dl:hover{border-color:var(--accent);color:#fff;background:var(--accent)}
+  .conv .dl.none{opacity:.25;cursor:not-allowed;pointer-events:none;color:var(--sub)}
+
+  /* ---------------- 右栏：成员详情 ---------------- */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--panel)}
+  .main-head{
+    padding:14px 20px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  }
+  .main-head .title{font-size:15.5px;font-weight:700}
+  .main-head .count{font-size:12px;color:var(--sub)}
+  .main-head .grow{flex:1}
+  .main-head input{
+    width:200px;padding:7px 11px;border-radius:8px;border:1px solid var(--line);
+    background:var(--card);color:var(--txt);font-size:12.5px;outline:none;
+  }
+  .main-head input:focus{border-color:var(--accent)}
+  .btn{
+    padding:7px 12px;border-radius:8px;border:1px solid var(--line);
+    background:var(--card);color:var(--txt);font-size:12.5px;cursor:pointer;
+  }
+  .btn:hover{border-color:var(--accent);color:#cfdcff}
+  .btn.on{background:var(--accent-soft);border-color:var(--accent);color:#dbe4ff}
+
+  .members{flex:1;overflow-y:auto;padding:10px 12px 26px}
+  .m{
+    display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:10px;
+  }
+  .m:hover{background:var(--hover)}
+  .m .av{
+    width:38px;height:38px;flex:0 0 38px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:14px;color:#fff;
+  }
+  .m .who{flex:1;min-width:0}
+  .m .who .n{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .m .who .u{font-size:11.5px;color:var(--sub);margin-top:1px}
+  .m .style{
+    max-width:190px;font-size:12px;color:#c3c8d2;
+    background:var(--card);border:1px solid var(--line);border-radius:8px;
+    padding:3px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .m .style.none{color:var(--sub);background:transparent;border-style:dashed}
+  /* ---- 专属词云（最多 9 个标签）---- */
+  .m .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+  .m .tags .tg{
+    font-size:11px;line-height:1.55;color:#c3c8d2;background:var(--card);
+    border:1px solid var(--line);border-radius:7px;padding:0 6px;white-space:nowrap;
+  }
+  .m .tags .tg:nth-child(5n+1){color:#dfe8ff;border-color:#3a4b7a}
+  .m .tags .tg:nth-child(5n+2){color:#ffe0c8;border-color:#6b4a35}
+  .m .tags .tg:nth-child(5n+3){color:#c8ecd9;border-color:#2f5c46}
+  .m .tags .tg:nth-child(5n+4){color:#d8d2ef;border-color:#463a6b}
+  .m .tags .tg:nth-child(5n+5){color:#c9d2de}
+  /* 浅色/粉色皮肤：把标签、说话方式、日志的字压深（原来那套浅字在浅底上等于隐身） */
+  html[data-theme="light"] .m .tags .tg,
+  html[data-persona="taffy"] .m .tags .tg{color:#8a3a63;background:#fff5fa;border-color:#ffd0e4}
+  html[data-theme="light"] .m .tags .tg:nth-child(5n+1),
+  html[data-persona="taffy"] .m .tags .tg:nth-child(5n+1){color:#1e4fc0;border-color:#c7d7ff}
+  html[data-theme="light"] .m .tags .tg:nth-child(5n+2),
+  html[data-persona="taffy"] .m .tags .tg:nth-child(5n+2){color:#8a4b16;border-color:#ffdcc0}
+  html[data-theme="light"] .m .tags .tg:nth-child(5n+3),
+  html[data-persona="taffy"] .m .tags .tg:nth-child(5n+3){color:#1c6b4a;border-color:#c9ecd9}
+  html[data-theme="light"] .m .tags .tg:nth-child(5n+4),
+  html[data-persona="taffy"] .m .tags .tg:nth-child(5n+4){color:#4a3a8a;border-color:#dcd4ff}
+  html[data-theme="light"] .m .tags .tg:nth-child(5n+5),
+  html[data-persona="taffy"] .m .tags .tg:nth-child(5n+5){color:#3a4658;border-color:#dbe2ec}
+  html[data-theme="light"] .m .style,
+  html[data-persona="taffy"] .m .style{color:#3a4658;background:#f2f5fb;border-color:#dde4ef}
+  html[data-theme="light"] .aff-log .tx,
+  html[data-persona="taffy"] .aff-log .tx{color:#3a4658}
+  html[data-theme="light"] .aff-log .it,
+  html[data-persona="taffy"] .aff-log .it{border-bottom-color:rgba(0,0,0,.06)}
+  html[data-theme="light"] .m .who:hover .n{color:#2f6fe4}
+  html[data-persona="taffy"] .m .who:hover .n{color:#ff4f98}
+  .m .tags .none{font-size:11px;color:var(--sub);border:1px dashed var(--line);
+    border-radius:7px;padding:0 6px}
+  .m .aff{
+    min-width:56px;text-align:right;font-size:13.5px;font-weight:700;
+    font-variant-numeric:tabular-nums;
+  }
+  .aff.pos{color:var(--good)} .aff.neg{color:var(--bad)} .aff.zero{color:var(--sub)}
+  .m .aff[data-edit]{cursor:pointer;border-radius:7px;padding:2px 6px;margin:-2px -6px}
+  .m .aff[data-edit]:hover{background:var(--hover);outline:1px dashed var(--line)}
+  /* 鲸圆券：跟好感度并排，颜色低调一点（券只是余额，不是感情） */
+  .m .wh{
+    min-width:44px;text-align:right;font-size:12.5px;font-weight:600;
+    color:var(--sub);font-variant-numeric:tabular-nums;cursor:pointer;
+    border-radius:7px;padding:2px 6px;margin:-2px -6px;
+  }
+  .m .wh:hover{background:var(--hover);outline:1px dashed var(--line);color:var(--txt)}
+  .m .wh::before{content:'券 ';font-weight:400;opacity:.65;font-size:11px}
+
+  /* ---- 好感度变动记录（点名字展开）---- */
+  .m{flex-wrap:wrap}
+  .m .who{cursor:pointer}
+  .m .who:hover .n{color:#cfdcff}
+  .m .who .n .caret{
+    display:inline-block;width:12px;font-size:10px;color:var(--sub);
+    transition:transform .15s;transform:translateY(-1px);
+  }
+  .m.open .who .n .caret{transform:translateY(-1px) rotate(90deg)}
+  .aff-log{
+    flex:0 0 100%;margin:4px 0 2px 50px;max-width:640px;
+    border-left:2px solid var(--line);padding-left:10px;
+  }
+  .aff-log .it{
+    display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:12.5px;
+    border-bottom:1px dashed rgba(255,255,255,.04);
+  }
+  .aff-log .it:last-child{border-bottom:none}
+  .aff-log .dl{
+    flex:0 0 34px;font-weight:700;font-variant-numeric:tabular-nums;
+    font-size:12.5px;text-align:right;
+  }
+  .aff-log .dl.up{color:var(--good)} .aff-log .dl.dn{color:var(--bad)}
+  .aff-log .tx{flex:1;min-width:0;color:#c8cdd6;word-break:break-all}
+  .aff-log .tm{flex:0 0 auto;color:var(--sub);font-size:11px}
+  .aff-log .empty{color:var(--sub);font-size:12px;padding:4px 0;text-align:left}
+  .aff-log .kbd{
+    flex:0 0 auto;font-size:10.5px;color:var(--sub);border:1px solid var(--line);
+    border-radius:5px;padding:0 4px;line-height:15px;
+  }
+
+  .zero-fold{
+    display:flex;align-items:center;gap:8px;margin:12px 6px 6px;padding:9px 12px;
+    border:1px dashed var(--line);border-radius:10px;color:var(--sub);font-size:12.5px;
+    cursor:pointer;user-select:none;
+  }
+  .zero-fold:hover{border-color:var(--accent);color:#cfdcff}
+  .zero-fold .arrow{font-size:11px;width:10px}
+  .zero-fold .n{margin-left:auto;background:var(--card);border-radius:10px;padding:1px 8px;font-size:11.5px}
+
+  .empty{padding:44px 20px;text-align:center;color:var(--sub);font-size:13px}
+  .foot{
+    padding:8px 20px;border-top:1px solid var(--line);
+    color:var(--sub);font-size:11.5px;display:flex;gap:10px;justify-content:space-between;
+  }
+  .foot a{color:var(--sub);text-decoration:none}
+  .foot a:hover{color:var(--accent)}
+
+  /* 滚动条：跟主题一致，别出现白条 */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#3a3e46;border-radius:6px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#4a505a;background-clip:content-box}
+
+  /* ---------------- 手机 ---------------- */
+  @media (max-width:760px){
+    .app{flex-direction:column}
+    .side{width:100%;flex:0 0 auto;max-height:34vh;border-right:none;border-bottom:1px solid var(--line)}
+    .side-head{padding:10px 12px 6px}
+    .side-head h1{font-size:15px}
+    .conv-list{padding:0 6px 8px}
+    .conv{padding:7px 8px;gap:8px}
+    .conv .av{width:34px;height:34px;flex:0 0 34px;font-size:13px}
+
+    .main-head{padding:8px 12px;gap:6px;flex-wrap:wrap;overflow:hidden}
+    .main-head .grow{display:none}          /* 手机上不要这个撑开的占位 */
+    .main-head .back{order:0}
+    .main-head .title{order:1;font-size:14px}
+    .main-head .count{order:2;font-size:11.5px}
+    .main-head input{order:5;flex:1 1 100%;width:100%;font-size:12.5px;padding:6px 10px}
+    .main-head .btn{order:10;flex:0 0 auto;padding:5px 10px;font-size:12px}
+    .main{overflow-x:hidden}
+    .back{display:inline-flex !important}
+
+    .members{padding:6px 8px 20px;overflow-x:hidden}
+    .m{gap:8px;padding:7px 6px}
+    .m .av{width:32px;height:32px;flex:0 0 32px;font-size:12.5px}
+    .m .who .n{font-size:13px}
+    .m .who .u{font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .m .style{max-width:78px;font-size:11px;padding:2px 6px;border-radius:6px}
+    .m .tags{gap:3px;margin-top:3px}
+    .m .tags .tg{font-size:10px;padding:0 5px;border-radius:6px}
+    .m .aff{min-width:38px;font-size:12.5px}
+    .aff-log{margin-left:40px;padding-left:8px}
+    .aff-log .it{font-size:12px;gap:6px}
+    .aff-log .dl{flex:0 0 30px}
+    .aff-log .tm{font-size:10.5px}
+    .foot{font-size:10.5px;padding:6px 12px}
+    /* 手机上不显示「最后发言」那一截，太挤 */
+    .m .who .u .last{display:none}
+  }
+  @media (max-width:420px){
+    /* 窄屏也保留词云，只是收得更紧（最多 9 个，会自己换行） */
+    .m .style{display:inline-block;max-width:62px;font-size:10.5px;padding:1px 5px}
+    .m .tags{gap:2px}
+    .m .tags .tg{font-size:9.5px;padding:0 4px}
+    .m .aff{min-width:34px;font-size:12px}
+    .m .who .n{font-size:12.5px}
+  }
+  .back{display:none;align-items:center;gap:6px;color:var(--accent);cursor:pointer;font-size:13px}
+</style>
+  <script src="/theme.js"></script>
+</head>
+<body>
+<div class="app">
+  <!-- 左：会话 -->
+  <aside class="side">
+    <div class="side-head">
+      <h1 id="sideTitle">花名册</h1>
+      <div class="meta" id="meta">加载中…</div>
+    </div>
+    <div class="side-search"><input id="qConv" placeholder="搜索群 / 好友…"></div>
+    <div class="conv-list" id="convs"></div>
+  </aside>
+
+  <!-- 右：成员 -->
+  <main class="main">
+    <div class="main-head">
+      <span class="back" id="back">‹ 返回</span>
+      <span class="title" id="title">选一个会话</span>
+      <span class="count" id="count"></span>
+      <span class="grow"></span>
+      <input id="qMem" placeholder="搜名字 / QQ 号 / 印象标签…">
+      <button class="btn" id="sortAff">按好感度</button>
+      <button class="btn" id="reload">刷新</button>
+    </div>
+    <div class="members" id="members">
+      <div class="empty">左边选一个会话</div>
+    </div>
+    <div class="foot">
+      <span>每个人的专属词云：由她的记忆 + 最近发言归纳，最多 9 个标签</span>
+      <span><a href="#" id="toPage">刷新于 …</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+// 人格：?persona=taffy → 看塔菲那份花名册（粉色皮肤、叫「灯牌」）
+const PERSONA = (new URLSearchParams(location.search).get('persona') || '').trim();
+const IS_TAFFY = PERSONA === 'taffy';
+const WORD = IS_TAFFY ? '灯牌' : '好感度';
+if (IS_TAFFY) document.documentElement.dataset.persona = 'taffy';
+document.title = (IS_TAFFY ? '塔菲的花名册' : '花名册') + ' · 肥鱼控制台';
+const AVA = ['#3f6aef','#4caf50','#f57c00','#9c27b0','#e91e63','#00acc1','#7e57c2','#2e9e8f'];
+
+let DATA = null;
+let DAILY = {};              // gid -> {count, url}  今天的聊天记录（服务端每天只留当天）
+let cur = null;              // 当前选中的 gid
+let byAff = false;
+let kwMem = '';
+let kwConv = '';
+let showZero = false;        // 「好感度 0」那一组是否展开（默认折叠）
+let openUid = new Set();     // 哪些人的好感度记录是展开的（可以同时开多个）
+
+const $ = id => document.getElementById(id);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function colorOf(key){
+  let h = 0;
+  for (const ch of String(key||'')) h = (h*31 + ch.codePointAt(0)) & 0x7fffffff;
+  return AVA[h % AVA.length];
+}
+function initial(name, fallback){
+  const s = (name || fallback || '?').trim();
+  return s ? Array.from(s)[0] : '?';
+}
+function affClass(v){ return v > 0 ? 'pos' : (v < 0 ? 'neg' : 'zero'); }
+function affText(v){ return v > 0 ? '+' + v : String(v); }
+
+/* ---------- 左栏 ---------- */
+function renderConvs(){
+  const box = $('convs');
+  if (!DATA) { box.innerHTML = '<div class="empty">没读到数据</div>'; return; }
+  let list = DATA.groups.slice();
+  if (kwConv) {
+    const k = kwConv.toLowerCase();
+    list = list.filter(g => (g.title + g.gid).toLowerCase().includes(k));
+  }
+  if (!list.length) { box.innerHTML = '<div class="empty">没有匹配的会话</div>'; return; }
+  box.innerHTML = list.map(g => {
+    const d = DAILY[g.gid];
+    const dl = d
+      ? `<a class="dl" href="${esc(d.url)}" title="下载今天的聊天记录（${d.count} 条）" data-dl="1" download>↓</a>`
+      : `<span class="dl none" title="今天还没有这个群的记录">↓</span>`;
+    return `
+    <div class="conv ${g.gid===cur?'on':''}" data-gid="${esc(g.gid)}">
+      <div class="av" style="background:${colorOf(g.gid)}">${esc(initial(g.title, g.gid))}</div>
+      <div class="mid">
+        <div class="nm">${esc(g.title)}</div>
+        <div class="sub" title="群 ${esc(g.gid)}${d ? '，今日已记录 ' + d.count + ' 条' : ''}">${esc(g.gid)}${d ? ' · 今日 ' + d.count : ''}</div>
+      </div>
+      <div class="badge">${g.total}</div>
+      ${dl}
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.conv').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-dl]')) return;   // 点下载别顺手切会话
+      cur = el.dataset.gid; renderConvs(); renderMembers();
+    });
+  });
+}
+
+/* ---------- 右栏 ---------- */
+function allMembers(){
+  const g = DATA && DATA.groups.find(x => x.gid === cur);
+  return g ? g.members : [];
+}
+
+function renderMembers(){
+  const g = DATA && DATA.groups.find(x => x.gid === cur);
+  if (!g) {
+    $('title').textContent = '选一个会话';
+    $('count').textContent = '';
+    $('members').innerHTML = '<div class="empty">左边选一个会话</div>';
+    return;
+  }
+  $('title').textContent = g.title;
+  let ms = g.members.slice();
+  if (kwMem) {
+    const k = kwMem.toLowerCase();
+    ms = ms.filter(m => (m.name + m.uid + (m.style||'') + ' ' + ((m.tags||[]).join(' '))).toLowerCase().includes(k));
+  }
+  if (byAff) ms.sort((a,b) => b.aff - a.aff || b.count - a.count);
+  $('count').textContent = `${ms.length} 人${kwMem ? '（已筛选）' : ''}`;
+
+  if (!ms.length) { $('members').innerHTML = '<div class="empty">没匹配到人</div>'; return; }
+
+  // 好感度为 0 的一坨默认折叠起来（搜索时自动展开，免得搜不到人）
+  const nz = ms.filter(m => m.aff !== 0);
+  const zero = ms.filter(m => m.aff === 0);
+  const expandZero = showZero || !!kwMem;
+
+  const row = m => {
+    const logs = Array.isArray(m.log) ? m.log : [];
+    const isOpen = openUid.has(m.uid);
+    const items = logs.length
+      ? logs.slice().reverse().map(x => {
+          const d = Number(x.d) || 0;
+          const cls = d > 0 ? 'up' : (d < 0 ? 'dn' : '');
+          const sign = d > 0 ? '+' + d : String(d);
+          const kind = x.k && x.k !== '投喂' ? `<span class="kbd">${esc(x.k)}</span>` : '';
+          return `<div class="it">
+            <span class="dl ${cls}">${sign}</span>
+            ${kind}
+            <span class="tx">${esc(x.r || '')}</span>
+            <span class="tm">${esc(x.t || '')}</span>
+          </div>`;
+        }).join('')
+      : '<div class="empty">还没有影响' + WORD + '的发言</div>';
+    return `
+    <div class="m ${isOpen?'open':''}" data-uid="${esc(m.uid)}">
+      <div class="av" style="background:${colorOf(m.uid)}">${esc(initial(m.name, m.uid))}</div>
+      <div class="who">
+        <div class="n"><span class="caret">▸</span>${esc(m.name)}${logs.length?` <span style="color:var(--sub);font-weight:400;font-size:11.5px">(${logs.length})</span>`:''}</div>
+        <div class="u">${esc(m.uid)} · 聊过 ${m.count} 条<span class="last">${m.last ? ' · 最后 ' + esc(m.last) : ''}</span></div>
+        <div class="tags">${(m.tags && m.tags.length)
+          ? m.tags.slice(0,9).map(t => `<span class="tg">${esc(t)}</span>`).join('')
+          : '<span class="none">还在攒印象</span>'}</div>
+      </div>
+      <div class="aff ${affClass(m.aff)}" data-edit="${esc(m.uid)}" title="点这里改${WORD}">${affText(m.aff)}</div>
+      <div class="wh" data-whale="${esc(m.uid)}" title="点这里改鲸圆券（数量随便填）">${Number(m.whale || 0)}</div>
+      ${isOpen ? `<div class="aff-log">${items}</div>` : ''}
+    </div>`;
+  };
+
+  let html = nz.map(row).join('');
+  if (zero.length) {
+    html += `<div class="zero-fold" id="zeroFold">
+      <span class="arrow">${expandZero ? '▾' : '▸'}</span>
+      <span>${WORD} 0 的人</span>
+      <span class="n">${zero.length}</span>
+    </div>`;
+    if (expandZero) html += zero.map(row).join('');
+  }
+  $('members').innerHTML = html;
+
+  const zf = $('zeroFold');
+  if (zf) zf.addEventListener('click', () => { showZero = !showZero; renderMembers(); });
+
+  // 点名字展开 / 收起这个人的好感度记录
+  $('members').querySelectorAll('.m .who').forEach(el => {
+    el.addEventListener('click', () => {
+      const uid = el.closest('.m').dataset.uid;
+      if (openUid.has(uid)) openUid.delete(uid); else openUid.add(uid);
+      renderMembers();
+    });
+  });
+
+  // 点好感度数字 → 改它
+  $('members').querySelectorAll('.aff[data-edit]').forEach(el => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const uid = el.dataset.edit;
+      const m = allMembers().find(x => x.uid === uid);
+      if (m) openAffEditor(m);
+    });
+  });
+
+  // 点鲸圆券数字 → 改它（2026-11-05 用户：「让我可以自由设置数量」）
+  $('members').querySelectorAll('.wh[data-whale]').forEach(el => {
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const uid = el.dataset.whale;
+      const m = allMembers().find(x => x.uid === uid);
+      if (m) openWhaleEditor(m);
+    });
+  });
+}
+
+/* ---------- 数据 ---------- */
+// 没有登录了：页面靠 URL 里的 ?token= 拿权限。没带 token 就提示一下。
+function showNeedToken(){
+  $('meta').textContent = '缺少 token';
+  $('members').innerHTML = '<div class="empty">这个页面需要在网址后面带上 <code>?token=…</code> 才能看</div>';
+}
+
+async function loadDaily(){
+  DAILY = {};
+  if (IS_TAFFY) return;          // 每日聊天记录是群的日志，不分人格；塔菲这页不显示 ↓
+  try {
+    const r = await fetch('/api/daily?token=' + encodeURIComponent(TOKEN), { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    (d.items || []).forEach(it => {
+      DAILY[it.gid] = {
+        count: it.count,
+        url: '/api/daily?gid=' + encodeURIComponent(it.gid) +
+             '&token=' + encodeURIComponent(TOKEN),
+      };
+    });
+  } catch (e) { }
+}
+
+async function load(){
+  if (!TOKEN) { showNeedToken(); return; }
+  try {
+    const r = await fetch('/api/roster?token=' + encodeURIComponent(TOKEN) +
+                          (PERSONA ? '&persona=' + encodeURIComponent(PERSONA) : ''),
+                          { cache: 'no-store' });
+    if (r.status === 401) { $('meta').textContent = 'token 不对'; return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    DATA = await r.json();
+    await loadDaily();          // 先拿到今天有哪些群有记录，再画左栏
+    const who = DATA.persona_name || (IS_TAFFY ? '塔菲' : '肥鱼');
+    if ($('sideTitle')) $('sideTitle').textContent = who + '的花名册';
+    if ($('sortAff')) $('sortAff').textContent = '按' + WORD;
+    $('meta').textContent = `${who} · ${DATA.people} 人 · ${DATA.groups.length} 个群`;
+    $('toPage').textContent = '刷新于 ' + DATA.ts;
+    if (!cur && DATA.groups.length) cur = DATA.groups[0].gid;
+    if (cur && !DATA.groups.some(g => g.gid === cur) && DATA.groups.length) cur = DATA.groups[0].gid;
+    renderConvs(); renderMembers();
+  } catch (e) {
+    $('meta').textContent = '读不到花名册：' + e.message;
+  }
+}
+
+/* ---------- 改好感度 ---------- */
+async function affSet(uid, payload, note){
+  const r = await fetch('/api/aff/set?token=' + encodeURIComponent(TOKEN), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({ uid: uid, note: note || '', persona: PERSONA }, payload)),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.ok) { alert(d.msg || '改失败'); return null; }
+  return d;
+}
+
+// 弹出一个小面板改好感度
+function openAffEditor(m){
+  const cur = Number(m.aff) || 0;
+  const v = prompt(
+    `改「${m.name}」的${WORD}\n\n` +
+    `当前：${cur}\n` +
+    `· 直接填数字 = 设成那个值（-255 ~ 256）\n` +
+    `· 填 +10 / -5 = 在当前基础上加减`,
+    String(cur));
+  if (v === null) return;
+  const s = String(v).trim();
+  if (!s) return;
+  let payload, note;
+  if (/^[+-]\d+$/.test(s)) {
+    payload = { delta: parseInt(s, 10) };
+    note = '网页手动 ' + s;
+  } else if (/^-?\d+$/.test(s)) {
+    payload = { value: parseInt(s, 10) };
+    note = `网页手动设为 ${s}`;
+  } else {
+    alert('只能填数字，比如 50 或 +10 或 -5');
+    return;
+  }
+  affSet(m.uid, payload, note).then(d => {
+    if (!d) return;
+    m.aff = d.new;
+    renderMembers();
+    $('meta').textContent = `${m.name}：${d.old} → ${d.new}（${d.delta >= 0 ? '+' : ''}${d.delta}）`;
+  });
+}
+
+/* ---------- 改鲸圆券（2026-11-05 用户：「让我可以自由设置数量」） ---------- */
+async function whaleSet(uid, payload, note){
+  const r = await fetch('/api/whale/set?token=' + encodeURIComponent(TOKEN), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({ uid: uid, note: note || '', persona: PERSONA }, payload)),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.ok) { alert(d.msg || '改失败'); return null; }
+  return d;
+}
+
+// 点券数字：随便填多少都行
+function openWhaleEditor(m){
+  const cur = Number(m.whale) || 0;
+  const v = prompt(
+    `改「${m.name}」的鲸圆券\n\n` +
+    `当前：${cur}\n` +
+    `· 直接填数字 = 设成那个值（想设多少设多少）\n` +
+    `· 填 +100 / -50 = 在当前基础上加减`,
+    String(cur));
+  if (v === null) return;
+  const s = String(v).trim();
+  if (!s) return;
+  let payload, note;
+  if (/^[+-]\d+$/.test(s)) {
+    payload = { delta: parseInt(s, 10) };
+    note = '网页手动 ' + s;
+  } else if (/^-?\d+$/.test(s)) {
+    payload = { value: parseInt(s, 10) };
+    note = `网页手动设为 ${s}`;
+  } else {
+    alert('只能填数字，比如 500 或 +100 或 -50');
+    return;
+  }
+  whaleSet(m.uid, payload, note).then(d => {
+    if (!d) return;
+    m.whale = d.w;
+    renderMembers();
+    $('meta').textContent =
+      `${m.name}：鲸圆券 ${d.old} → ${d.w}（${d.delta >= 0 ? '+' : ''}${d.delta}）`;
+  });
+}
+
+$('qConv').addEventListener('input', e => { kwConv = e.target.value.trim(); renderConvs(); });
+$('qMem').addEventListener('input', e => { kwMem = e.target.value.trim(); renderMembers(); });
+$('reload').addEventListener('click', load);
+$('sortAff').addEventListener('click', e => {
+  byAff = !byAff;
+  e.target.classList.toggle('on', byAff);
+  e.target.textContent = byAff ? '按聊天数' : ('按' + WORD);
+  renderMembers();
+});
+$('back').addEventListener('click', () => {
+  // 手机上回到列表：把左栏滚到顶部并让右栏提示选会话
+  document.querySelector('.side').scrollIntoView({behavior:'smooth'});
+  $('qConv').focus();
+});
+$('toPage').addEventListener('click', e => { e.preventDefault(); load(); });
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

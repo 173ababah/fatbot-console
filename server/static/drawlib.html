@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>画图图库 · 肥鱼控制台</title>
+<style>
+  :root{
+    --bg:#16181c; --panel:#1d2025; --card:#23262c; --hover:#2b2f36;
+    --line:#31353d; --txt:#e9eaec; --sub:#8d939c;
+    --accent:#4a7bff; --accent-soft:#25324f; --good:#4fbf7f; --bad:#e0605f; --warn:#e0a44f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft Yahei",sans-serif}
+  header{position:sticky;top:0;z-index:20;background:rgba(22,24,28,.94);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);padding:10px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:15px;margin:0 8px 0 0;font-weight:600}
+  header .sp{flex:1}
+  input,button,select,textarea{font:inherit;color:var(--txt);background:var(--card);
+    border:1px solid var(--line);border-radius:9px;padding:7px 10px;outline:none}
+  input:focus,textarea:focus{border-color:var(--accent)}
+  button{cursor:pointer}
+  button:hover{background:var(--hover)}
+  button.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.pri:hover{filter:brightness(1.1)}
+  button.danger{color:var(--bad);border-color:#4a2b2c}
+  button.on{background:var(--accent-soft);border-color:var(--accent);color:#cfe0ff}
+  #q{width:200px}
+  .wrap{padding:14px;padding-bottom:60px}
+  .meta{color:var(--sub);font-size:12.5px;margin:0 0 12px}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;
+    cursor:pointer;transition:.15s;position:relative;display:flex;flex-direction:column}
+  .card:hover{transform:translateY(-2px);border-color:#48505c}
+  .card .th{aspect-ratio:1/1;background:#0f1114;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .card .th img{width:100%;height:100%;object-fit:cover;display:block}
+  .card .th .ph{color:var(--sub);font-size:12px}
+  .card .in{padding:8px 9px 9px}
+  .card .tt{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .sb{color:var(--sub);font-size:11.5px;margin-top:3px;display:flex;gap:6px;flex-wrap:wrap}
+  .card .tg{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+  .tg span{font-size:11px;background:#2b3038;color:#aeb6c2;border-radius:6px;padding:1px 6px}
+  .fav{position:absolute;top:7px;right:8px;font-size:15px;filter:drop-shadow(0 1px 2px #000)}
+  .empty{color:var(--sub);text-align:center;padding:60px 10px}
+  /* 大图弹层 */
+  #ov{position:fixed;inset:0;background:rgba(8,9,11,.9);display:none;z-index:50;overflow:auto;padding:18px}
+  #ov.on{display:block}
+  .sheet{max-width:1000px;margin:0 auto;background:var(--panel);border:1px solid var(--line);
+    border-radius:16px;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+  @media (max-width:820px){ .sheet{grid-template-columns:1fr} }
+  .sheet .big{background:#0b0c0e;display:flex;align-items:center;justify-content:center;min-height:220px}
+  .sheet .big img{max-width:100%;max-height:78vh;display:block}
+  .side{padding:14px 16px 18px;display:flex;flex-direction:column;gap:10px}
+  .side label{font-size:12px;color:var(--sub)}
+  .side input,.side textarea{width:100%}
+  .side textarea{min-height:74px;resize:vertical}
+  .kv{font-size:12px;color:var(--sub);line-height:1.7;word-break:break-all}
+  .kv b{color:#b9c0cb;font-weight:600}
+  .row{display:flex;gap:8px;align-items:center}
+  .row.end{justify-content:flex-end}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#2b3038;
+    color:#fff;padding:9px 16px;border-radius:10px;border:1px solid var(--line);opacity:0;
+    transition:.2s;pointer-events:none;z-index:99;font-size:13px}
+  #toast.on{opacity:1}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#343a43;border-radius:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🖼 画图图库</h1>
+  <input id="q" placeholder="搜提示词 / 标题 / 备注 / 数字ID" oninput="debounce()">
+  <button id="favBtn" onclick="toggleFav()">⭐ 收藏</button>
+  <select id="tagSel" onchange="reload()"><option value="">全部标签</option></select>
+  <button onclick="reload()">刷新</button>
+  <span class="sp"></span>
+  <span class="meta" id="cnt" style="margin:0"></span>
+</header>
+
+<div class="wrap">
+  <div class="meta">每次 `/画图` 的原图都会自动进这里；点开任意一张可以改标题、标签、备注、收藏或删除。</div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none"></div>
+</div>
+
+<div id="ov">
+  <div class="sheet">
+    <div class="big"><img id="bigImg" alt=""></div>
+    <div class="side">
+      <div id="kv" class="kv"></div>
+      <div><label>标题</label><input id="fTitle" placeholder="给这张起个名字"></div>
+      <div><label>标签（逗号分隔）</label><input id="fTags" placeholder="白毛, 泳装, 脱衣"></div>
+      <div><label>备注</label><textarea id="fNote" placeholder="想记什么就写什么"></textarea></div>
+      <div class="row">
+        <button class="pri" onclick="save()">保存</button>
+        <button id="favToggle" onclick="toggleFavCur()">⭐ 收藏</button>
+        <button onclick="dl()">下载原图</button>
+        <span class="sp" style="flex:1"></span>
+        <button class="danger" onclick="del()">删除</button>
+      </div>
+      <div class="row end"><button onclick="closeOv()">关闭</button></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const $ = id => document.getElementById(id);
+let CUR = null, ITEMS = [], FAV_ONLY = false;
+// 2026-11-11：计数和"缺缩略图重试次数"提到外面 —— 以前删一张图/加星都整页 reload()，
+// 200 张图重下一遍，用户看到的就是"怎么每次删图都要重新加载"。
+let LAST_ALL = 0, LAST_TOTAL = 0, THUMB_TRIES = 0;
+function paintCnt(){ $('cnt').textContent = '共 ' + LAST_ALL + ' 张 / 筛出 ' + LAST_TOTAL + ' 张'; }
+function cardEl(id){ return [...document.querySelectorAll('#grid .card')].find(e=>e.dataset.id===id); }
+/** 只把这一张从列表里拿掉，别的格子原样不动（不重新请求、不重下缩略图）。 */
+function dropCard(id){
+  const el = cardEl(id);
+  if(el) el.remove();
+  ITEMS = ITEMS.filter(x=>x.id!==id);
+  if(!ITEMS.length){ render(); }
+}
+/** 改标题/标签后，就地更新那一个格子。 */
+function updateCard(it){
+  const el = cardEl(it.id); if(!el) return;
+  const t = it.title || (it.user_want || it.prompt || '').slice(0,18) || it.id;
+  const tt = el.querySelector('.tt'); if(tt) tt.textContent = t;
+  const tg = el.querySelector('.tg');
+  if(tg) tg.innerHTML = (it.tags||[]).slice(0,4).map(x=>'<span>'+esc(x)+'</span>').join('');
+}
+
+function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('on');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('on'),1600); }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let _dt=null; function debounce(){ clearTimeout(_dt); _dt=setTimeout(reload, 280); }
+
+async function api(p, opt){
+  const u = p + (p.includes('?')?'&':'?') + 'token=' + encodeURIComponent(TOKEN);
+  const r = await fetch(u, opt || {cache:'no-store'});
+  if (r.status === 401) throw new Error('token 不对');
+  return r;
+}
+
+async function reload(){
+  if(!TOKEN){ $('empty').style.display='block'; $('empty').textContent='网址后面要带 ?token=…'; return; }
+  const q = encodeURIComponent($('q').value.trim());
+  const tag = encodeURIComponent($('tagSel').value || '');
+  let j;
+  try{
+    const r = await api('/api/drawlib?limit=200&q='+q+'&tag='+tag+(FAV_ONLY?'&fav=1':''));
+    j = await r.json();
+  }catch(e){ toast(e.message); return; }
+  ITEMS = j.items || [];
+  LAST_ALL = j.all||0; LAST_TOTAL = j.total||0;
+  paintCnt();
+  // 标签下拉（保留当前选择）
+  const sel = $('tagSel'), cur = sel.value;
+  sel.innerHTML = '<option value="">全部标签</option>' +
+    (j.tags||[]).map(([t,n])=>'<option value="'+esc(t)+'">'+esc(t)+' ('+n+')</option>').join('');
+  sel.value = cur;
+  render();
+}
+
+function render(){
+  const g = $('grid'), em = $('empty');
+  if(!ITEMS.length){ g.innerHTML=''; em.style.display='block'; em.textContent='还没有画过图，或者没有匹配的。'; return; }
+  em.style.display='none';
+  g.innerHTML = ITEMS.map(it=>{
+    const t = it.title || (it.user_want || it.prompt || '').slice(0,18) || it.id;
+    const tags = (it.tags||[]).slice(0,4).map(t=>'<span>'+esc(t)+'</span>').join('');
+    const th = it.have_thumb
+      ? '<img loading="lazy" src="/api/drawlib/thumb?id='+encodeURIComponent(it.id)+'&token='+encodeURIComponent(TOKEN)+'">'
+      : '<div class="ph">生成缩略图…</div>';
+    return '<div class="card" data-id="'+esc(it.id)+'" onclick="open1(\''+esc(it.id)+'\')">'+
+      (it.fav?'<div class="fav">⭐</div>':'')+
+      '<div class="th">'+th+'</div><div class="in">'+
+      '<div class="tt">'+esc(t)+'</div>'+
+      '<div class="sb"><span>'+esc((it.at||'').slice(5,16))+'</span>'+
+      (it.style?'<span>'+esc(it.style)+'</span>':'')+
+      (it.nsfw?'<span style="color:#e0a44f">NSFW</span>':'')+'</div>'+
+      (tags?'<div class="tg">'+tags+'</div>':'')+
+      '</div></div>';
+  }).join('');
+  // 没缩略图的：**只给缺的那几张补图**（最多重试 3 轮），不再整页 reload
+  THUMB_TRIES = 0;
+  retryThumbs();
+}
+
+function retryThumbs(){
+  const miss = ITEMS.filter(it=>!it.have_thumb);
+  if(!miss.length || THUMB_TRIES >= 3) return;
+  THUMB_TRIES++;
+  setTimeout(function(){
+    miss.forEach(function(it){
+      const el = cardEl(it.id); if(!el) return;
+      const th = el.querySelector('.th'); if(!th || !th.querySelector('.ph')) return;
+      th.innerHTML = '<img loading="lazy" src="/api/drawlib/thumb?id=' +
+        encodeURIComponent(it.id) + '&token=' + encodeURIComponent(TOKEN) +
+        '&t=' + Date.now() + '">';
+    });
+    retryThumbs();
+  }, 1500 * THUMB_TRIES);
+}
+
+function open1(id){
+  const it = ITEMS.find(x=>x.id===id); if(!it) return;
+  CUR = it;
+  $('bigImg').src = '/api/drawlib/img?id='+encodeURIComponent(id)+'&token='+encodeURIComponent(TOKEN);
+  $('fTitle').value = it.title || '';
+  $('fTags').value = (it.tags||[]).join(', ');
+  $('fNote').value = it.note || '';
+  $('kv').innerHTML =
+    '<b>ID</b> '+esc(it.id)+'<br>'+
+    '<b>时间</b> '+esc(it.at||'')+'<br>'+
+    '<b>画风</b> '+esc(it.style||'-')+' · <b>尺寸</b> '+esc(it.size||'-')+
+      ' · <b>耗时</b> '+(it.cost_s?it.cost_s+'s':'-')+'<br>'+
+    '<b>模型</b> '+esc(it.model||'-')+' · <b>方式</b> '+esc(it.refs_kind||'-')+
+      (it.nref?'（'+it.nref+' 张参考图）':'')+'<br>'+
+    '<b>画的人</b> '+esc(it.uid||'-')+' · <b>会话</b> '+esc(it.chat||'-')+'<br>'+
+    '<b>提示词</b> '+esc(it.prompt||'-');
+  $('favToggle').textContent = it.fav ? '⭐ 取消收藏' : '⭐ 收藏';
+  $('ov').classList.add('on');
+}
+function closeOv(){ $('ov').classList.remove('on'); $('bigImg').src=''; CUR=null; }
+
+async function save(){
+  if(!CUR) return;
+  const body = {id:CUR.id, title:$('fTitle').value, tags:$('fTags').value, note:$('fNote').value};
+  const r = await api('/api/drawlib/edit', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)});
+  const j = await r.json();
+  toast(j.msg || (j.ok?'已保存':'失败'));
+  if(j.ok){ Object.assign(CUR, j.item); updateCard(CUR); }
+}
+
+async function toggleFavCur(){
+  if(!CUR) return;
+  const body = {id:CUR.id, fav: !CUR.fav};
+  const r = await api('/api/drawlib/edit', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)});
+  const j = await r.json();
+  toast(j.ok ? (body.fav?'已加星':'已取消') : j.msg);
+  if(j.ok){
+    CUR.fav = body.fav;
+    $('favToggle').textContent = body.fav?'⭐ 取消收藏':'⭐ 收藏';
+    const el = cardEl(CUR.id);
+    if(el){
+      const b = el.querySelector('.fav');
+      if(body.fav && !b){ const d=document.createElement('div'); d.className='fav'; d.textContent='⭐'; el.appendChild(d); }
+      else if(!body.fav && b){ b.remove(); }
+    }
+    // 在"只看收藏"里取消收藏 → 这张自然不该再出现，就地拿掉（不用重拉整页）
+    if(FAV_ONLY && !body.fav){
+      dropCard(CUR.id);
+      LAST_TOTAL = Math.max(0, LAST_TOTAL-1);
+      paintCnt();
+      closeOv();
+    }
+  }
+}
+
+function toggleFav(){
+  FAV_ONLY = !FAV_ONLY;
+  $('favBtn').classList.toggle('on', FAV_ONLY);
+  reload();
+}
+
+async function del(){
+  if(!CUR) return;
+  if(!confirm('真的删掉这张？（原图会从服务器上删掉）')) return;
+  const r = await api('/api/drawlib/del', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id:CUR.id})});
+  const j = await r.json();
+  toast(j.msg || (j.ok?'已删除':'失败'));
+if(j.ok){
+    dropCard(CUR.id);
+    LAST_TOTAL = Math.max(0, LAST_TOTAL-1);
+    LAST_ALL = Math.max(0, LAST_ALL-1);
+    paintCnt();
+    closeOv();
+  }
+}
+
+function dl(){
+  if(!CUR) return;
+  location.href = '/api/drawlib/img?dl=1&id='+encodeURIComponent(CUR.id)+'&token='+encodeURIComponent(TOKEN);
+}
+
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeOv(); });
+$('ov').addEventListener('click', e=>{ if(e.target.id==='ov') closeOv(); });
+reload();
+</script>
+</body>
+</html>
+

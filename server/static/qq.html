@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Web QQ · 肥鱼的聊天窗口</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#141518;color:#e6e8ee;font:15px/1.7 -apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif}
+  .box{max-width:520px;padding:28px 30px;background:#1e2024;border:1px solid #2c2f36;border-radius:14px}
+  h1{font-size:18px;margin:0 0 12px}
+  p{margin:8px 0;color:#a8adba}
+  code{background:#0f1114;border:1px solid #2c2f36;border-radius:5px;padding:1px 6px;color:#8ab4ff}
+  .go{display:inline-block;margin-top:14px;padding:9px 18px;background:#4a7bff;color:#fff;
+      border-radius:8px;text-decoration:none;font-weight:600}
+  .err{color:#ff8b8b}
+</style>
+</head>
+<body>
+<div class="box" id="box">
+  <h1>正在打开 Web QQ…</h1>
+  <p>Stapxs QQ Lite 2.0（MIT 开源）· 直连本机 OneBot</p>
+</div>
+<script>
+(function () {
+  var box = document.getElementById('box');
+  var q = new URLSearchParams(location.search);
+  var token = (q.get('token') || '').trim();
+  if (!token) {
+    box.innerHTML = '<h1 class="err">缺少 token</h1>' +
+      '<p>请用 <code>/qq.html?token=…</code> 打开（token 就是控制台那个）。</p>';
+    return;
+  }
+  // Stapxs 把所有设置塞在 localStorage 的 options 里，格式是 key:encodeURIComponent(值)&…
+  // 注意：它的 load() 用 split(':') 且要求恰好两段，所以地址里的冒号必须编码成 %3A。
+  var addr = location.host + '/qqws';
+  var opts = [
+    'address:' + encodeURIComponent(addr),
+    'save_password:' + encodeURIComponent(token),
+    'auto_connect:true',
+    'opt_dark:false',
+    'language:zh-CN'
+  ].join('&') + '&';
+  try {
+    localStorage.setItem('options', opts);
+  } catch (e) {
+    box.innerHTML = '<h1 class="err">浏览器不让写 localStorage</h1><p>' + e + '</p>';
+    return;
+  }
+  box.innerHTML = '<h1>正在连接…</h1><p>地址 <code>' + addr + '</code></p>' +
+    '<p>如果 2 秒后没跳转，<a class="go" href="/Stapxs-QQ-Lite-2.0/">手动打开</a></p>';
+  location.replace('/Stapxs-QQ-Lite-2.0/');
+})();
+</script>
+</body>
+</html>

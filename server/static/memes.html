@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>梗库 · 肥鱼</title>
+<style>
+  :root{
+    --bg:#0f1013; --card:#171920; --card2:#1d2029; --line:#262a35;
+    --text:#e8ecf5; --sub:#8b93a7; --accent:#5b8cff; --good:#4ade80;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7fb; --card:#fff; --card2:#f0f2f8; --line:#e3e7f0;
+           --text:#1a1e28; --sub:#6b7280; --accent:#3b6fe0; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+       padding:20px 14px 60px}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--sub);font-size:13px;margin-bottom:18px}
+  .bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  input{flex:1;min-width:180px;background:var(--card2);border:1px solid var(--line);
+        color:var(--text);border-radius:10px;padding:10px 12px;font-size:14px;outline:none}
+  input:focus{border-color:var(--accent)}
+  .stat{color:var(--sub);font-size:13px;margin:10px 0 16px}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:14px;
+        padding:14px 16px;margin-bottom:10px}
+  .names{font-weight:600;font-size:15px;margin-bottom:6px}
+  .names .badge{font-size:11px;font-weight:400;color:var(--accent);
+                border:1px solid var(--accent);border-radius:6px;padding:1px 5px;margin-left:6px}
+  .desc{color:var(--sub);font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+  .meta{color:var(--sub);font-size:11.5px;margin-top:8px;opacity:.8}
+  .empty{color:var(--sub);text-align:center;padding:40px 0}
+  .foot{color:var(--sub);font-size:12px;text-align:center;margin-top:26px;line-height:1.8}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>梗库</h1>
+  <div class="sub">白米饭大鲸记着的梗，随口提到就会接一句或甩个表情包</div>
+  <div class="bar">
+    <input id="q" placeholder="搜梗名或介绍…" autocomplete="off">
+  </div>
+  <div class="stat" id="stat">加载中…</div>
+  <div id="list"></div>
+  <div class="foot">
+    数据由肥鱼自己同步 · 这里只显示梗名和介绍<br>
+    <a href="/">回首页</a> · <a href="/me">查我的好感度</a>
+  </div>
+</div>
+<script>
+(function(){
+  var all = [], q = document.getElementById('q');
+  var list = document.getElementById('list'), stat = document.getElementById('stat');
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function render(){
+    var kw = q.value.trim().toLowerCase();
+    var hit = !kw ? all : all.filter(function(it){
+      var n = (it.names || []).join(' ').toLowerCase();
+      return n.indexOf(kw) >= 0 || (it.desc || '').toLowerCase().indexOf(kw) >= 0;
+    });
+    if (!hit.length){
+      list.innerHTML = '<div class="empty">' +
+        (all.length ? '没搜到这个梗' : '梗库还是空的') + '</div>';
+      stat.textContent = all.length + ' 个梗' + (kw ? '，匹配 ' + hit.length + ' 个' : '');
+      return;
+    }
+    list.innerHTML = hit.map(function(it){
+      var names = (it.names || []).map(esc).join('、');
+      var badge = it.has_sticker ? '<span class="badge">有表情包</span>' : '';
+      return '<div class="item">' +
+        '<div class="names">' + names + badge + '</div>' +
+        '<div class="desc">' + esc(it.desc) + '</div>' +
+        (it.hits ? '<div class="meta">被提到 ' + it.hits + ' 次</div>' : '') +
+        '</div>';
+    }).join('');
+    stat.textContent = all.length + ' 个梗' + (kw ? '，匹配 ' + hit.length + ' 个' : '');
+  }
+
+  q.addEventListener('input', render);
+
+  fetch('/api/memes', { cache: 'no-store' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d || !d.ok){ stat.textContent = (d && d.msg) || '读取失败'; return; }
+      all = d.items || [];
+      render();
+    })
+    .catch(function(e){
+      stat.textContent = '读取失败：' + e.message;
+    });
+})();
+</script>
+</body>
+</html>

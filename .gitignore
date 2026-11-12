@@ -1,8 +1,6 @@
 # 编译产物
 __pycache__/
 *.pyc
-*.exe
-*.apk
 *.dll
 *.pdb
 bin/
@@ -21,3 +19,7 @@ local.properties
 Thumbs.db
 console-config.json
 deploy/*.log
+
+# 公开发布版二进制（脱敏源码编译，凭据走 console-config.json）
+!release/*.exe
+!release/*.apk

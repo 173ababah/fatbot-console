@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>我和肥鱼 · 好感度</title>
+<style>
+  :root{
+    --bg:#141518; --card:#1e2024; --card2:#25282d; --line:#2f333a;
+    --txt:#e9eaec; --sub:#8d939c; --accent:#4a7bff;
+    --good:#4fbf7f; --bad:#e0605f;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0;background:var(--bg);color:var(--txt);min-height:100vh;
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI",sans-serif;
+    padding:0 0 40px;
+  }
+  .wrap{max-width:520px;margin:0 auto;padding:0 16px}
+
+  /* ---------- 顶部 ---------- */
+  .hero{text-align:center;padding:44px 0 26px}
+  .hero .em{font-size:44px;line-height:1;margin-bottom:10px}
+  .hero h1{margin:0;font-size:21px;letter-spacing:.5px}
+  .hero p{margin:8px 0 0;color:var(--sub);font-size:13.5px}
+
+  /* ---------- 输入 ---------- */
+  .ask{padding:6px 0 0}
+  .ask label{display:block;color:var(--sub);font-size:12.5px;margin-bottom:7px}
+  .row{display:flex;gap:9px}
+  .row input{
+    flex:1;min-width:0;padding:13px 15px;border-radius:12px;border:1px solid var(--line);
+    background:var(--card);color:var(--txt);font-size:16px;outline:none;
+    font-variant-numeric:tabular-nums;
+  }
+  .row input:focus{border-color:var(--accent)}
+  .row input::placeholder{color:#5d636d}
+  .row button{
+    flex:0 0 auto;padding:0 22px;border-radius:12px;border:0;cursor:pointer;
+    background:var(--accent);color:#fff;font-size:15px;font-weight:600;
+  }
+  .row button:active{opacity:.8}
+  .row button:disabled{opacity:.5;cursor:default}
+  .hint{margin-top:10px;color:var(--sub);font-size:12px;line-height:1.55}
+
+  /* ---------- 结果 ---------- */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:20px;margin-top:20px;
+  }
+  .who{display:flex;align-items:center;gap:12px}
+  .av{
+    width:48px;height:48px;flex:0 0 48px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:19px;color:#fff;
+  }
+  .who .nm{font-size:16px;font-weight:700}
+  .who .id{font-size:12px;color:var(--sub);margin-top:2px}
+
+  .score{text-align:center;padding:22px 0 6px}
+  .score .num{
+    font-size:52px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;
+    letter-spacing:-1px;
+  }
+  .score .num.pos{color:var(--good)} .score .num.neg{color:var(--bad)} .score .num.zero{color:var(--sub)}
+  .score .mood{margin-top:10px;font-size:15px;color:#c8cdd6}
+  .score .meta{margin-top:8px;font-size:12px;color:var(--sub)}
+
+  /* 温度条 */
+  .bar{
+    height:8px;border-radius:99px;background:var(--card2);margin:18px 0 4px;
+    position:relative;overflow:hidden;
+  }
+  .bar .fill{
+    position:absolute;inset:0 auto 0 0;border-radius:99px;
+    background:linear-gradient(90deg,#e0605f,#b0685f,#5f7bb0,#4fbf7f);
+    transition:width .5s ease;
+  }
+  .bar-ends{display:flex;justify-content:space-between;color:var(--sub);font-size:11px}
+
+  h2.sec{
+    font-size:13px;color:var(--sub);font-weight:600;letter-spacing:.06em;
+    margin:26px 0 10px;
+  }
+
+  /* ---------- 词云（她记住的你） ---------- */
+  .cloud{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+  .cloud .tg{
+    padding:5px 11px;border-radius:11px;line-height:1.35;
+    background:var(--card);border:1px solid var(--line);color:#cfd6e2;
+    word-break:break-word;
+  }
+  .cloud .tg.s1{font-size:18px;font-weight:800;color:#dfe8ff;border-color:#3a4b7a;background:#212a3d}
+  .cloud .tg.s2{font-size:16px;font-weight:700;color:#ffe0c8;border-color:#6b4a35;background:#2a2320}
+  .cloud .tg.s3{font-size:14px;font-weight:600;color:#c8ecd9;border-color:#2f5c46;background:#1d2621}
+  .cloud .tg.s4{font-size:13px;color:#d8d2ef;border-color:#463a6b;background:#232033}
+  .cloud .tg.s5{font-size:12px;color:#aeb6c2}
+  .log{display:flex;flex-direction:column;gap:1px}
+  .it{
+    display:flex;gap:10px;align-items:baseline;padding:9px 12px;
+    background:var(--card);border-radius:10px;
+  }
+  .it .dl{
+    flex:0 0 40px;text-align:right;font-weight:700;font-size:14px;
+    font-variant-numeric:tabular-nums;
+  }
+  .it .dl.up{color:var(--good)} .it .dl.dn{color:var(--bad)}
+  .it .tx{flex:1;min-width:0;font-size:13.5px;color:#cdd2da;word-break:break-word}
+  .it .tm{flex:0 0 auto;font-size:11px;color:var(--sub)}
+  .it .kbd{
+    flex:0 0 auto;font-size:10.5px;color:var(--sub);border:1px solid var(--line);
+    border-radius:5px;padding:0 5px;line-height:16px;
+  }
+  .none{
+    padding:22px;text-align:center;color:var(--sub);font-size:13px;
+    background:var(--card);border-radius:12px;
+  }
+
+  .err{
+    margin-top:16px;padding:14px 16px;border-radius:12px;
+    background:#3a2325;border:1px solid #5a2f32;color:#f0b6b5;font-size:13.5px;
+  }
+  .foot{text-align:center;color:#5d636d;font-size:11.5px;margin-top:30px;line-height:1.8}
+  .foot a{color:#6d7480;text-decoration:none}
+  .loading{text-align:center;color:var(--sub);font-size:13px;padding:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="em">🐳</div>
+    <h1>我在你心里有多重要？</h1>
+    <p>输入你的 QQ 号，看看我对你的印象</p>
+  </div>
+
+  <div class="ask" id="askBox">
+    <label for="qq">你的 QQ 号</label>
+    <div class="row">
+      <input id="qq" type="tel" inputmode="numeric" maxlength="12"
+             placeholder="例如 123456789" autocomplete="off">
+      <button id="go">查看</button>
+    </div>
+    <div class="hint">
+      只看你自己的记录。我不会告诉别人你来过，也不会把你的号显示给别人。
+    </div>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="foot">
+    肥鱼是一个个人项目，会记错、会有情绪。<br>
+    <a href="#" id="again">查别的号</a>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const AVA = ['#3f6aef','#4caf50','#f57c00','#9c27b0','#e91e63','#00acc1','#7e57c2','#2e9e8f'];
+function colorOf(key){
+  let h = 0;
+  for (const ch of String(key||'')) h = (h*31 + ch.codePointAt(0)) & 0x7fffffff;
+  return AVA[h % AVA.length];
+}
+function initial(name, fb){
+  const s = (name || fb || '?').trim();
+  return s ? Array.from(s)[0] : '?';
+}
+function affClass(v){ return v > 0 ? 'pos' : (v < 0 ? 'neg' : 'zero'); }
+
+// 分值 → 温度条百分比（-255..256 映射到 0..100%）
+function tempPct(v){
+  const MN = -255, MX = 256;
+  const p = (v - MN) / (MX - MN) * 100;
+  return Math.max(2, Math.min(100, p));
+}
+
+const out = $('out');
+const qqInput = $('qq');
+const goBtn = $('go');
+
+function showErr(msg){
+  out.innerHTML = `<div class="err">${esc(msg)}</div>`;
+}
+
+function render(d){
+  const v = Number(d.aff) || 0;
+  const cls = affClass(v);
+  const sign = v > 0 ? '+' + v : String(v);
+  const logs = Array.isArray(d.log) ? d.log : [];
+  const tags = Array.isArray(d.tags) ? d.tags.filter(t => t && String(t).trim()).slice(0, 9) : [];
+  const cloud = tags.length
+    ? tags.map((t, i) => `<span class="tg s${(i % 5) + 1}">${esc(t)}</span>`).join('')
+    : '<div class="none">还没攒够印象…多来找我聊聊天吧</div>';
+  const list = logs.length ? logs.map(x => {
+    const dv = Number(x.d) || 0;
+    const c = dv > 0 ? 'up' : (dv < 0 ? 'dn' : '');
+    const s = dv > 0 ? '+' + dv : String(dv);
+    const kind = x.k && x.k !== '投喂' ? `<span class="kbd">${esc(x.k)}</span>` : '';
+    return `<div class="it">
+      <span class="dl ${c}">${s}</span>
+      ${kind}
+      <span class="tx">${esc(x.r || '')}</span>
+      <span class="tm">${esc(x.t || '')}</span>
+    </div>`;
+  }).join('') : '<div class="none">还没有影响好感度的发言。<br>多来找我聊天试试？</div>';
+
+  out.innerHTML = `
+    <div class="card">
+      <div class="who">
+        <div class="av" style="background:${colorOf(d.qq)}">${esc(initial(d.name, d.qq))}</div>
+        <div>
+          <div class="nm">${esc(d.name)}</div>
+          <div class="id">${esc(d.qq)}</div>
+        </div>
+      </div>
+      <div class="score">
+        <div class="num ${cls}">${sign}</div>
+        <div class="mood">${esc(d.mood || '')}</div>
+        <div class="meta">${d.count ? `跟我聊过 ${d.count} 条` : ''}${d.last ? ` · 最近 ${esc(d.last)}` : ''}</div>
+      </div>
+      <div class="bar"><div class="fill" style="width:${tempPct(v)}%"></div></div>
+      <div class="bar-ends"><span>很不待见</span><span>黏到不行</span></div>
+    </div>
+    <h2 class="sec">她记住的你${tags.length ? `（${tags.length} 个印象）` : ''}</h2>
+    <div class="cloud">${cloud}</div>
+    <h2 class="sec">影响我对你印象的话${logs.length ? `（最近 ${logs.length} 条）` : ''}</h2>
+    <div class="log">${list}</div>
+  `;
+}
+
+async function query(qq){
+  qq = (qq || '').trim();
+  if (!/^\d{5,12}$/.test(qq)) { showErr('QQ 号应该是 5~12 位数字'); return; }
+  goBtn.disabled = true;
+  out.innerHTML = '<div class="loading">查一下…</div>';
+  try {
+    const r = await fetch('/api/me?qq=' + encodeURIComponent(qq), { cache: 'no-store' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) { showErr(d.msg || '没查到，换个号试试'); return; }
+    render(d);
+    // 记一下，下次打开直接显示（只存在自己手机上）
+    try { localStorage.setItem('fish_qq', qq); } catch(e){}
+    history.replaceState(null, '', '?qq=' + encodeURIComponent(qq));
+  } catch (e) {
+    showErr('网络不太好，再试一次？');
+  } finally {
+    goBtn.disabled = false;
+  }
+}
+
+$('go').addEventListener('click', () => query(qqInput.value));
+qqInput.addEventListener('keydown', e => { if (e.key === 'Enter') query(qqInput.value); });
+$('again').addEventListener('click', e => {
+  e.preventDefault();
+  out.innerHTML = '';
+  qqInput.value = '';
+  history.replaceState(null, '', location.pathname);
+  qqInput.focus();
+});
+
+// 打开时：URL 带 qq 就直接查；否则填上次的号但不自动查
+(function init(){
+  const fromUrl = new URLSearchParams(location.search).get('qq');
+  if (fromUrl) { qqInput.value = fromUrl; query(fromUrl); return; }
+  try {
+    const saved = localStorage.getItem('fish_qq');
+    if (saved) qqInput.value = saved;
+  } catch(e){}
+})();
+</script>
+</body>
+</html>

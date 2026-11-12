@@ -1,22 +1,36 @@
-# 编译电脑端控制台（不需要安装任何东西，用 Windows 自带 .NET Framework 的 csc）
-# 用法：powershell -ExecutionPolicy Bypass -File build.ps1
-$ErrorActionPreference = "Stop"
-$here = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-if (-not (Test-Path $csc)) { $csc = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
-if (-not (Test-Path $csc)) { throw "找不到 csc.exe（需要 .NET Framework 4.0+）" }
+# 编译 WPF 版控制台（只用 .NET Framework 自带程序集，不需要装 SDK）
+$ErrorActionPreference = 'Stop'
+$dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+$out = Join-Path $dir '肥鱼控制台WPF.exe'
 
-$out = Join-Path $here "肥鱼机器人开关.exe"
-& $csc /nologo /target:winexe /platform:anycpu /optimize+ `
-    /out:"$out" `
-    /win32icon:"$here\fish_icon.ico" `
-    /r:System.dll /r:System.Core.dll /r:System.Drawing.dll `
-    /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll `
-    "$here\FishBotConsole.cs"
+# WPF 程序集在 GAC 里，用完整路径引用
+$fw = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\WPF'
+$refs = @(
+  "$fw\PresentationFramework.dll",
+  "$fw\PresentationCore.dll",
+  "$fw\WindowsBase.dll",
+  'System.Xaml.dll',
+  'System.Windows.Forms.dll',
+  'System.Drawing.dll',
+  'System.Web.Extensions.dll',
+  'System.Core.dll'
+)
+$refArgs = $refs | ForEach-Object { '/r:' + $_ }
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK -> $out" -ForegroundColor Green
-    Write-Host "运行前请设置环境变量 FATBOT_CONSOLE_TOKEN（后端 token）" -ForegroundColor Yellow
+# 图标：/win32icon 决定 exe 文件图标 + 任务栏图标；/resource 让托盘能按资源名取指定尺寸
+# （以前两样都没传，所以 exe 是默认白纸图标、托盘退回 SystemIcons.Application）
+$ico = Join-Path $dir 'fish_icon.ico'
+$iconArgs = @()
+if (Test-Path $ico) {
+  $iconArgs += '/win32icon:' + $ico
+  $iconArgs += '/resource:' + $ico + ',fish.ico'
 } else {
-    throw "编译失败，退出码 $LASTEXITCODE"
+  Write-Host '警告：找不到 fish_icon.ico，exe 和托盘都会用系统默认图标'
 }
+
+Write-Host '编译中…'
+& $csc /nologo /target:winexe /platform:x64 /out:$out @refArgs @iconArgs (Join-Path $dir 'FishBotConsole.cs') 2>&1 |
+  ForEach-Object { $_ } | Where-Object { $_ -match 'error|警告' }
+if ($LASTEXITCODE -ne 0) { throw "编译失败 (exit $LASTEXITCODE)" }
+Write-Host ("OK -> $out  " + [math]::Round((Get-Item $out).Length / 1KB, 1) + " KB")

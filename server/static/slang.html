@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#141518">
+<title>群聊黑话 · 肥鱼控制台</title>
+<style>
+  :root{
+    --bg:#141518; --card:#1d1f23; --card2:#22252a; --line:#2f333a;
+    --text:#e8eaed; --sub:#9aa3af; --accent:#4a7bff; --accent2:#2b3d6b;
+    --ok:#3fc878; --danger:#ef5b60; --warn:#f0b429;
+    --r:14px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f5f6fa; --card:#fff; --card2:#eef1f7; --line:#dde2ec;
+           --text:#161a22; --sub:#5d6675; --accent:#2f6fe4; --accent2:#dbe6ff;
+           --ok:#178a4c; --danger:#c4342d; --warn:#b57b00; }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+       padding:16px 14px 90px}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--sub);font-size:12.5px;margin-bottom:14px;line-height:1.7}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+        padding:12px 14px;margin-bottom:12px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  select,input{background:var(--card2);border:1px solid var(--line);color:var(--text);
+        border-radius:10px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit}
+  select{flex:1 1 240px;min-width:0}
+  input:focus,select:focus{border-color:var(--accent)}
+  .search{flex:1 1 160px;min-width:0}
+  button{border:0;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;
+         background:var(--card2);color:var(--text);border:1px solid var(--line);cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:var(--danger);border-color:var(--danger);background:transparent}
+  button:active{filter:brightness(1.15)}
+  button:disabled{opacity:.45;cursor:default}
+  .stat{color:var(--sub);font-size:12.5px;margin:10px 0 2px}
+  .stat b{color:var(--text)}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  .row .w{flex:0 0 30%;min-width:96px}
+  .row .d{flex:1;min-width:0}
+  .row .x{flex:0 0 auto;padding:9px 11px;line-height:1}
+  .empty{color:var(--sub);text-align:center;padding:28px 0;font-size:13.5px}
+  .foot{color:var(--sub);font-size:12px;text-align:center;margin-top:18px;line-height:1.8}
+  a{color:var(--accent);text-decoration:none}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+         background:var(--accent);color:#fff;padding:10px 18px;border-radius:12px;
+         font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.on{opacity:1}
+  .toast.bad{background:var(--danger)}
+  .hint{color:var(--sub);font-size:12px;margin-top:8px}
+  .tag{display:inline-block;font-size:11px;color:var(--accent);border:1px solid var(--accent);
+       border-radius:6px;padding:0 5px;margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>群聊黑话 <span class="tag">按群存</span></h1>
+  <div class="sub">
+    每个群一份小词典：<b>词 = 说明</b>。她聊天时会把跟当前话题相关的那几条塞进上下文，
+    所以说明要写清楚「什么意思、什么场合用、褒还是贬」。改完点保存立刻生效（不用重启）。
+  </div>
+
+  <div class="card">
+    <div class="bar">
+      <select id="gsel"><option value="">载入中…</option></select>
+      <input class="search" id="q" placeholder="搜词或说明…">
+    </div>
+    <div class="bar" style="margin-top:8px">
+      <select id="csel" title="从哪个群复制"><option value="">复制自…</option></select>
+      <button id="pull">⤵ 拉进来</button>
+      <button id="push">⤴ 存到多个群</button>
+    </div>
+    <div id="pushbox" style="display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+      <div class="sub" style="margin:0 0 6px">把**勾选的**那几条写进下面勾选的群：</div>
+      <div id="pushlist" style="max-height:220px;overflow:auto"></div>
+      <label class="sub" style="display:block;margin:6px 0"><input type="checkbox" id="ovr"> 覆盖目标群里同名的词（不勾 = 目标已有的保留）</label>
+      <div class="bar"><button class="primary" id="pushok">写入勾选的群</button><button id="pushcancel">取消</button></div>
+    </div>
+    <div class="stat" id="stat">–</div>
+  </div>
+
+  <div class="card">
+    <div id="rows"></div>
+    <div class="bar" style="margin-top:10px">
+      <button class="primary" id="add">＋ 加一条</button>
+      <button id="selall">全选</button>
+      <button id="selnone">全不选</button>
+      <button class="primary" id="save">保存这个群</button>
+      <button class="danger" id="clr">清空这个群</button>
+    </div>
+    <div class="hint">词最多 20 字、说明最多 80 字；同名词保存时以后面的为准。没填说明的行不会被保存。</div>
+  </div>
+
+  <div class="foot">
+    数据文件：<code>/opt/qqbot/data/slang.json</code> ·
+    <a href="index.html">← 回控制台</a>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token')
+           || localStorage.getItem('fish_token') || '';
+if (TOKEN) localStorage.setItem('fish_token', TOKEN);
+const api = (p) => p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+
+let ALL = {};        // {gid: {词: 说明}}
+let GROUPS = [];     // [{gid, name}]
+let CUR = '';        // 当前群号
+let DIRTY = false;
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg, bad) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast on' + (bad ? ' bad' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.className = 'toast'; }, 1800);
+}
+
+async function getJSON(p) {
+  const r = await fetch(api(p), {cache: 'no-store'});
+  if (r.status === 401) throw new Error('token 无效');
+  return r.json();
+}
+
+async function postJSON(p, body) {
+  const r = await fetch(api(p), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {})
+  });
+  if (r.status === 401) throw new Error('token 无效');
+  return r.json();
+}
+
+function groupName(gid) {
+  if (String(gid) === '*') return '🌐 全局（所有群）';
+  const g = GROUPS.find(x => String(x.gid) === String(gid));
+  const n = g && g.name ? g.name : '';
+  return n ? (n + ' · ' + gid) : ('群 ' + gid);
+}
+
+function itemsOf(gid) {
+  return (ALL[gid] && typeof ALL[gid] === 'object') ? ALL[gid] : {};
+}
+
+function renderGroups() {
+  const sel = $('gsel');
+  const seen = new Set();
+  const opts = [];
+  // 全局排最前面（2026-11-01 用户要的：所有群都认）
+  const gn = Object.keys(itemsOf('*')).length;
+  opts.push(`<option value="*">🌐 全局（所有群）${gn ? '（' + gn + ' 条）' : ''}</option>`);
+  seen.add('*');
+  GROUPS.forEach(g => {
+    const gid = String(g.gid);
+    if (seen.has(gid)) return;
+    seen.add(gid);
+    const n = Object.keys(itemsOf(gid)).length;
+    opts.push(`<option value="${gid}">${groupName(gid)}${n ? '（' + n + ' 条）' : ''}</option>`);
+  });
+  Object.keys(ALL).sort().forEach(gid => {
+    if (seen.has(gid)) return;
+    opts.push(`<option value="${gid}">群 ${gid}（${Object.keys(itemsOf(gid)).length} 条）</option>`);
+  });
+  if (!opts.length) opts.push('<option value="">（还没有群）</option>');
+  sel.innerHTML = opts.join('');
+  if (CUR) sel.value = CUR;
+  else if (opts.length) { CUR = sel.value; }
+  // 「复制自」用同一份列表（全局在最前），尽量保留上次选的
+  const cs = document.getElementById('csel');
+  if (cs) {
+    const keep = cs.value;
+    cs.innerHTML = opts.join('');
+    const has = keep && opts.some(o => o.indexOf('value="' + keep + '"') >= 0);
+    cs.value = has ? keep : '*';
+  }
+}
+
+function rowHTML(word, desc) {
+  return `<div class="row">
+    <input type="checkbox" class="sel" checked title="勾上：复制时带上这条">
+    <input class="w" maxlength="20" placeholder="词" value="${esc(word)}">
+    <input class="d" maxlength="80" placeholder="说明（什么意思/什么场合/褒贬）" value="${esc(desc)}">
+    <button class="x danger" title="删掉这条">✕</button>
+  </div>`;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderRows() {
+  const box = $('rows');
+  const kw = ($('q').value || '').trim().toLowerCase();
+  const items = itemsOf(CUR);
+  let pairs = Object.entries(items);
+  if (kw) pairs = pairs.filter(([k, v]) =>
+    k.toLowerCase().includes(kw) || String(v).toLowerCase().includes(kw));
+  if (!pairs.length) {
+    box.innerHTML = `<div class="empty">${kw ? '没有匹配的词' : '这个群还没有黑话，点「＋ 加一条」开始'}</div>`;
+  } else {
+    box.innerHTML = pairs.map(([k, v]) => rowHTML(k, v)).join('');
+  }
+  box.querySelectorAll('.row').forEach(r => {
+    r.querySelectorAll('input').forEach(i => i.oninput = () => { DIRTY = true; });
+    const cbsel = r.querySelector('.sel');
+    if (cbsel) cbsel.onchange = () => { stat(); };
+    r.querySelector('.x').onclick = () => { r.remove(); DIRTY = true; stat(); };
+  });
+  stat();
+}
+
+function stat() {
+  const rows = [...$('rows').querySelectorAll('.row')];
+  const filled = rows.filter(r => {
+    const w = r.querySelector('.w').value.trim();
+    const d = r.querySelector('.d').value.trim();
+    return w && d;
+  }).length;
+  const total = Object.values(ALL).reduce((n, m) => n + Object.keys(m || {}).length, 0);
+  const sel = rows.filter(r => {
+    const cb = r.querySelector('.sel');
+    const w = r.querySelector('.w').value.trim();
+    const d = r.querySelector('.d').value.trim();
+    return cb && cb.checked && w && d;
+  }).length;
+  $('stat').innerHTML = `这个群 <b>${filled}</b> 条（勾选 ${sel} 条，复制只带勾选的）· 全库 <b>${total}</b> 条` +
+    (DIRTY ? ' · <span style="color:var(--warn)">有改动没保存</span>' : '');
+}
+
+function collect() {
+  const out = {};
+  $('rows').querySelectorAll('.row').forEach(r => {
+    const w = r.querySelector('.w').value.trim();
+    const d = r.querySelector('.d').value.trim();
+    if (w && d) out[w] = d;
+  });
+  return out;
+}
+
+async function save(silent) {
+  const items = collect();
+  const rows = [...$('rows').querySelectorAll('.row')];
+  const incomplete = rows.filter(r => {
+    const w = r.querySelector('.w').value.trim();
+    const d = r.querySelector('.d').value.trim();
+    return (w && !d) || (!w && d);
+  }).length;
+  if (incomplete && !silent) toast('有 ' + incomplete + ' 行没填全，跳过了', true);
+  const r = await postJSON('/api/slang', {gid: CUR, items});
+  if (!r.ok) { toast(r.msg || '保存失败', true); return; }
+  if (Object.keys(items).length) ALL[CUR] = items; else delete ALL[CUR];
+  DIRTY = false;
+  renderGroups();
+  $('gsel').value = CUR;
+  renderRows();
+  toast('已保存：' + (r.count || 0) + ' 条');
+}
+
+async function load() {
+  try {
+    const [sl, gs] = await Promise.all([
+      getJSON('/api/slang'),
+      getJSON('/api/groups').catch(() => ({items: []}))
+    ]);
+    ALL = sl.groups || {};
+    GROUPS = (gs.items || []).filter(g => g.gid);
+  } catch (e) {
+    $('stat').textContent = String(e.message || e);
+    if (String(e.message).includes('token')) {
+      $('stat').innerHTML = '需要 token：地址后面加 <code>?token=你的token</code> 打开一次即可记住';
+    }
+    return;
+  }
+  // 默认选有黑话最多的那个群；没黑话就选群列表第一个
+  const gids = Object.keys(ALL).sort((a, b) =>
+    Object.keys(itemsOf(b)).length - Object.keys(itemsOf(a)).length);
+  CUR = (ALL['*'] && Object.keys(ALL['*']).length) ? '*' : (gids[0] || (GROUPS[0] && String(GROUPS[0].gid)) || '');
+  renderGroups();
+  if (CUR) $('gsel').value = CUR;
+  renderRows();
+}
+
+$('gsel').onchange = () => {
+  if (DIRTY && !confirm('这个群有改动没保存，切走就丢了。确定切？')) {
+    $('gsel').value = CUR;
+    return;
+  }
+  CUR = $('gsel').value;
+  DIRTY = false;
+  $('q').value = '';
+  renderRows();
+};
+
+$('q').oninput = renderRows;
+
+$('add').onclick = () => {
+  const box = $('rows');
+  if (box.querySelector('.empty')) box.innerHTML = '';
+  box.insertAdjacentHTML('beforeend', rowHTML('', ''));
+  const rows = box.querySelectorAll('.row');
+  const last = rows[rows.length - 1];
+  last.querySelectorAll('input').forEach(i => i.oninput = () => { DIRTY = true; });
+  last.querySelector('.x').onclick = () => { last.remove(); DIRTY = true; stat(); };
+  last.querySelector('.w').focus();
+  DIRTY = true;
+  stat();
+};
+
+$('save').onclick = () => save(false).catch(e => toast(String(e.message || e), true));
+
+$('clr').onclick = async () => {
+  if (!CUR) return;
+  if (!confirm('清空「' + groupName(CUR) + '」的全部黑话？')) return;
+  $('rows').innerHTML = '';
+  DIRTY = true;
+  await save(true);
+};
+
+/* ---------------- 复制：拉进来 / 存到多个群（2026-11-01 用户要的） ---------------- */
+function checkedItems() {
+  const out = {};
+  document.querySelectorAll('#rows .row').forEach(r => {
+    if (!r.querySelector('.sel').checked) return;
+    const w = r.querySelector('.w').value.trim();
+    const d = r.querySelector('.d').value.trim();
+    if (w && d) out[w] = d;
+  });
+  return out;
+}
+
+function curItems() {
+  const out = {};
+  document.querySelectorAll('#rows .row').forEach(r => {
+    const w = r.querySelector('.w').value.trim();
+    const d = r.querySelector('.d').value.trim();
+    if (w && d) out[w] = d;
+  });
+  return out;
+}
+
+function hookRows() {
+  document.querySelectorAll('#rows .row').forEach(r => {
+    r.querySelectorAll('input').forEach(i => i.oninput = () => { DIRTY = true; });
+    const cbsel = r.querySelector('.sel');
+    if (cbsel) cbsel.onchange = () => { stat(); };
+    r.querySelector('.x').onclick = () => { r.remove(); DIRTY = true; stat(); };
+  });
+}
+
+$('pull').onclick = () => {
+  const src = $('csel').value;
+  if (!src) { toast('先在「复制自」里选来源', true); return; }
+  if (src === CUR) { toast('来源就是当前群', true); return; }
+  const sm = itemsOf(src);
+  if (!Object.keys(sm).length) { toast('来源没有黑话', true); return; }
+  const box = $('rows');
+  if (box.querySelector('.empty')) box.innerHTML = '';
+  const existing = {};
+  box.querySelectorAll('.row').forEach(r => { existing[r.querySelector('.w').value.trim()] = r; });
+  let added = 0, updated = 0;
+  Object.keys(sm).forEach(w => {
+    const d = sm[w];
+    const row = existing[w];
+    if (row) {
+      const di = row.querySelector('.d');
+      if (di.value !== d) { di.value = d; updated++; }
+    } else {
+      box.insertAdjacentHTML('beforeend', rowHTML(w, d));
+      added++;
+    }
+  });
+  hookRows();
+  DIRTY = true;
+  renderRows();
+  toast('拉了 ' + added + ' 条、更新 ' + updated + ' 条（记得保存）');
+};
+
+$('push').onclick = () => {
+  if (!Object.keys(checkedItems()).length) { toast('一条都没勾（先勾上要复制的词）', true); return; }
+  const gids = [...new Set([...GROUPS.map(g => String(g.gid)), ...Object.keys(ALL)])]
+    .filter(g => g !== CUR && g !== '*').sort();
+  $('pushlist').innerHTML = gids.map(g => {
+    const n = Object.keys(itemsOf(g)).length;
+    return `<label style="display:block;font-size:13px;margin:3px 0">
+      <input type="checkbox" class="tg" value="${g}"> ${groupName(g)}（${n} 条）</label>`;
+  }).join('') || '<div class="empty">没有别的群</div>';
+  $('pushbox').style.display = 'block';
+};
+
+$('pushcancel').onclick = () => { $('pushbox').style.display = 'none'; };
+
+$('pushok').onclick = async () => {
+  const picks = [...document.querySelectorAll('#pushlist .tg:checked')].map(x => x.value);
+  if (!picks.length) { toast('一个群都没勾', true); return; }
+  const ov = $('ovr').checked;
+  const src = checkedItems();
+  let done = 0;
+  for (const g of picks) {
+    const m = Object.assign({}, itemsOf(g));
+    Object.keys(src).forEach(k => { if (ov || !(k in m)) m[k] = src[k]; });
+    const r = await postJSON('/api/slang', {gid: g, items: m});
+    if (r.ok) { ALL[g] = m; done++; }
+  }
+  $('pushbox').style.display = 'none';
+  renderGroups();
+  toast('已写入 ' + done + ' 个群');
+};
+
+/* 全选 / 全不选 */
+$('selall').onclick = () => {
+  document.querySelectorAll('#rows .sel').forEach(c => { c.checked = true; });
+  stat();
+};
+$('selnone').onclick = () => {
+  document.querySelectorAll('#rows .sel').forEach(c => { c.checked = false; });
+  stat();
+};
+
+window.addEventListener('beforeunload', (e) => {
+  if (DIRTY) { e.preventDefault(); e.returnValue = ''; }
+});
+
+load();
+</script>
+</body>
+</html>
